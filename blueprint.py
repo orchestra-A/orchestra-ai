@@ -1,14 +1,18 @@
 """Generate a structured project blueprint from a raw app idea using Gemini."""
 
 import json # for parsing the JSON response
+import os # for reading environment variables
 import re # for regular expressions
 import sys # for command line arguments
 
+from dotenv import load_dotenv # for loading .env files
 from google import genai # for generating the blueprint
 from google.genai import types # for typed generation config
 
-GEMINI_API_KEY = "AIzaSyAYEU1EnQAVO0a19UfU9Vl62P1YAt2VTeU"
-MODEL_NAME = "gemini-2.0-flash"
+load_dotenv()
+
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+MODEL_NAME = "gemini-1.5-flash-8b"
 
 PROMPT_TEMPLATE = """You are a senior software architect. Break the following app idea
 into a structured project blueprint.
@@ -56,9 +60,9 @@ def extract_json(text: str) -> str:
 
 
 def generate_blueprint(idea: str) -> dict:
-    if not GEMINI_API_KEY or GEMINI_API_KEY == "YOUR_API_KEY_HERE":
+    if not GEMINI_API_KEY:
         raise RuntimeError(
-            "Set GEMINI_API_KEY at the top of this file before running."
+            "GEMINI_API_KEY is not set. Add it to a .env file in the project root."
         )
 
     client = genai.Client(api_key=GEMINI_API_KEY)
