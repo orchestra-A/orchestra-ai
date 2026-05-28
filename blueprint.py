@@ -29,7 +29,7 @@ comments, or any text outside the JSON. The JSON must match this exact schema:
     {{
       "id": "T1",
       "title": "string",
-      "track": "frontend" | "backend" | "AI",
+      "track": "string",
       "description": "string",
       "dependencies": ["T0", "..."]
     }}
@@ -38,7 +38,9 @@ comments, or any text outside the JSON. The JSON must match this exact schema:
 
 Rules:
 - Use short stable ids like T1, T2, T3 ...
-- "track" must be exactly one of: "frontend", "backend", "AI".
+- "track" should be automatically chosen based on the type of work involved in each task.
+- Use concise, descriptive track names such as "frontend", "backend", "AI", "mobile", "devops", "database", "design", "qa", "security", etc.
+- Keep track naming consistent across tasks.
 - "dependencies" is an array of task ids this task depends on (use [] if none).
 - Cover the full stack needed to ship the idea (UI, APIs, data, AI/ML pieces).
 - Output JSON only. No explanations."""
