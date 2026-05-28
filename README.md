@@ -27,7 +27,7 @@ The roadmap is designed to help teams break down work into clear, dependency-awa
 
 - `blueprint.py` - Main script that:
   - Loads `GEMINI_API_KEY` from `.env`
-  - Sends the raw app idea to Gemini (`gemini-1.5-flash`)
+  - Sends the raw app idea to Gemini (`gemini-2.5-flash`)
   - Enforces JSON-only output
   - Parses and pretty-prints the final roadmap JSON
 
@@ -81,10 +81,9 @@ The service returns JSON in this shape:
 }
 ```
 
-`track` is constrained to one of:
-- `frontend`
-- `backend`
-- `AI`
+`track` is automatically determined by the AI based on the type 
+of work involved. Examples: `frontend`, `backend`, `AI`, `mobile`, 
+`devops`, `database`, `design`, `qa`, `security`, etc.
 
 ## Current Status
 
