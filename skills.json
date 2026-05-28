@@ -1,0 +1,28 @@
+{
+  "Mitaali": [
+    "AI",
+    "LLM prompting",
+    "JSON extraction",
+    "RAG"
+  ],
+  "Naman": [
+    "Neo4j",
+    "knowledge graph"
+  ],
+  "Arnav": [
+    "FastAPI",
+    "webhooks",
+    "backend"
+  ],
+  "Prince": [
+    "React",
+    "Reactflow",
+    "frontend"
+  ],
+  "Isha": [
+    "React",
+    "Tailwind",
+    "dashboard",
+    "frontend"
+  ]
+}

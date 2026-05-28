@@ -1,0 +1,335 @@
+{
+  "project_name": "AI Fridge Recipe Suggester",
+  "tasks": [
+    {
+      "id": "T1",
+      "title": "Project Kick-off & Architecture Design",
+      "track": "design",
+      "description": "Define overall system architecture, technology stack, and project scope.",
+      "dependencies": [],
+      "assigned_to": "Arnav"
+    },
+    {
+      "id": "T2",
+      "title": "UI/UX Design for Mobile App",
+      "track": "design",
+      "description": "Create wireframes, mockups, and user flows for the mobile application.",
+      "dependencies": [
+        "T1"
+      ],
+      "assigned_to": "Prince"
+    },
+    {
+      "id": "T3",
+      "title": "Database Schema Design",
+      "track": "database",
+      "description": "Design schemas for recipes, ingredients, user data, and other necessary entities.",
+      "dependencies": [
+        "T1"
+      ],
+      "assigned_to": "Naman"
+    },
+    {
+      "id": "T4",
+      "title": "Setup Backend API Framework",
+      "track": "backend",
+      "description": "Initialize backend project, select framework, and configure basic server.",
+      "dependencies": [
+        "T1"
+      ],
+      "assigned_to": "Arnav"
+    },
+    {
+      "id": "T5",
+      "title": "Setup Cloud Infrastructure",
+      "track": "devops",
+      "description": "Provision cloud resources (e.g., compute, storage, networking) for backend and AI services.",
+      "dependencies": [
+        "T1"
+      ],
+      "assigned_to": "Arnav"
+    },
+    {
+      "id": "T6",
+      "title": "Setup Database Infrastructure",
+      "track": "database",
+      "description": "Provision and configure database instances in the cloud environment.",
+      "dependencies": [
+        "T3",
+        "T5"
+      ],
+      "assigned_to": "Naman"
+    },
+    {
+      "id": "T7",
+      "title": "Implement User Authentication/Authorization",
+      "track": "backend",
+      "description": "Develop API endpoints and logic for user registration, login, and session management.",
+      "dependencies": [
+        "T4",
+        "T3",
+        "T6"
+      ],
+      "assigned_to": "Arnav"
+    },
+    {
+      "id": "T8",
+      "title": "Implement Recipe Data Storage & Retrieval",
+      "track": "backend",
+      "description": "Develop API endpoints for storing and retrieving recipe information from the database.",
+      "dependencies": [
+        "T4",
+        "T3",
+        "T6"
+      ],
+      "assigned_to": "Arnav"
+    },
+    {
+      "id": "T9",
+      "title": "Implement Image Upload API Endpoint",
+      "track": "backend",
+      "description": "Create an API endpoint to receive and securely store uploaded fridge photos.",
+      "dependencies": [
+        "T4",
+        "T5"
+      ],
+      "assigned_to": "Arnav"
+    },
+    {
+      "id": "T10",
+      "title": "Research & Select AI Models for Object Detection",
+      "track": "AI",
+      "description": "Investigate existing models or decide on custom model approach for ingredient detection.",
+      "dependencies": [
+        "T1"
+      ],
+      "assigned_to": "Mitaali"
+    },
+    {
+      "id": "T11",
+      "title": "Data Acquisition & Preprocessing for AI Model",
+      "track": "AI",
+      "description": "Gather and prepare image datasets for training the object detection model (e.g., ingredient images).",
+      "dependencies": [
+        "T10"
+      ],
+      "assigned_to": "Mitaali"
+    },
+    {
+      "id": "T12",
+      "title": "Train & Evaluate Object Detection Model",
+      "track": "AI",
+      "description": "Train the selected AI model to identify various food items/ingredients in images and evaluate its performance.",
+      "dependencies": [
+        "T11"
+      ],
+      "assigned_to": "Mitaali"
+    },
+    {
+      "id": "T13",
+      "title": "Develop Ingredient Extraction & Normalization Logic",
+      "track": "AI",
+      "description": "Implement logic to process object detection results, extract ingredient names, and normalize them against a known ingredient list.",
+      "dependencies": [
+        "T12",
+        "T3"
+      ],
+      "assigned_to": "Mitaali"
+    },
+    {
+      "id": "T14",
+      "title": "Design & Implement Recipe Recommendation Engine",
+      "track": "AI",
+      "description": "Develop algorithms to suggest recipes based on the extracted and available ingredients.",
+      "dependencies": [
+        "T13",
+        "T8"
+      ],
+      "assigned_to": "Mitaali"
+    },
+    {
+      "id": "T15",
+      "title": "Deploy AI Models as API Service",
+      "track": "AI",
+      "description": "Package and deploy the trained object detection and recommendation models as a scalable API service.",
+      "dependencies": [
+        "T12",
+        "T14",
+        "T5"
+      ],
+      "assigned_to": "Mitaali"
+    },
+    {
+      "id": "T16",
+      "title": "Integrate AI Service with Backend",
+      "track": "backend",
+      "description": "Modify the backend to call the AI service with uploaded images and receive ingredient/recipe suggestions.",
+      "dependencies": [
+        "T9",
+        "T15",
+        "T8"
+      ],
+      "assigned_to": "Arnav"
+    },
+    {
+      "id": "T17",
+      "title": "Setup Mobile App Project",
+      "track": "mobile",
+      "description": "Initialize mobile app project and configure development environment.",
+      "dependencies": [
+        "T1",
+        "T2"
+      ],
+      "assigned_to": "Prince"
+    },
+    {
+      "id": "T18",
+      "title": "Implement Mobile Camera & Photo Capture",
+      "track": "mobile",
+      "description": "Develop functionality within the mobile app to access the device camera and capture photos.",
+      "dependencies": [
+        "T17"
+      ],
+      "assigned_to": "Prince"
+    },
+    {
+      "id": "T19",
+      "title": "Implement Mobile Image Upload to Backend",
+      "track": "mobile",
+      "description": "Develop functionality to upload captured photos from the mobile app to the backend API.",
+      "dependencies": [
+        "T18",
+        "T9"
+      ],
+      "assigned_to": "Prince"
+    },
+    {
+      "id": "T20",
+      "title": "Implement Mobile User Authentication UI",
+      "track": "mobile",
+      "description": "Build UI for user registration, login, and profile management in the mobile app.",
+      "dependencies": [
+        "T17",
+        "T7",
+        "T2"
+      ],
+      "assigned_to": "Isha"
+    },
+    {
+      "id": "T21",
+      "title": "Implement Mobile Recipe Display UI",
+      "track": "mobile",
+      "description": "Design and implement the UI to display suggested recipes, including details and images.",
+      "dependencies": [
+        "T17",
+        "T16",
+        "T2"
+      ],
+      "assigned_to": "Isha"
+    },
+    {
+      "id": "T22",
+      "title": "Implement CI/CD Pipelines",
+      "track": "devops",
+      "description": "Set up automated build, test, and deployment pipelines for backend, AI, and mobile components.",
+      "dependencies": [
+        "T5",
+        "T4",
+        "T15",
+        "T17"
+      ],
+      "assigned_to": "Arnav"
+    },
+    {
+      "id": "T23",
+      "title": "Setup Monitoring & Logging",
+      "track": "devops",
+      "description": "Configure monitoring tools and centralized logging for all deployed services.",
+      "dependencies": [
+        "T5",
+        "T22"
+      ],
+      "assigned_to": "Arnav"
+    },
+    {
+      "id": "T24",
+      "title": "Develop Backend API Tests",
+      "track": "qa",
+      "description": "Write unit, integration, and end-to-end tests for all backend API endpoints.",
+      "dependencies": [
+        "T7",
+        "T8",
+        "T9",
+        "T16"
+      ],
+      "assigned_to": "Arnav"
+    },
+    {
+      "id": "T25",
+      "title": "Develop AI Model Evaluation & Integration Tests",
+      "track": "qa",
+      "description": "Create tests to validate AI model performance and its integration with the backend.",
+      "dependencies": [
+        "T15",
+        "T16"
+      ],
+      "assigned_to": "Mitaali"
+    },
+    {
+      "id": "T26",
+      "title": "Develop Mobile App UI & Integration Tests",
+      "track": "qa",
+      "description": "Write UI tests and integration tests for the mobile application's features.",
+      "dependencies": [
+        "T19",
+        "T20",
+        "T21"
+      ],
+      "assigned_to": "Prince"
+    },
+    {
+      "id": "T27",
+      "title": "End-to-End System Testing",
+      "track": "qa",
+      "description": "Perform comprehensive testing of the entire system from mobile app to backend and AI services.",
+      "dependencies": [
+        "T24",
+        "T25",
+        "T26"
+      ],
+      "assigned_to": "Arnav"
+    },
+    {
+      "id": "T28",
+      "title": "Prepare for Mobile App Store Submission",
+      "track": "mobile",
+      "description": "Finalize app branding, metadata, screenshots, and adhere to platform guidelines for submission.",
+      "dependencies": [
+        "T27"
+      ],
+      "assigned_to": "Prince"
+    },
+    {
+      "id": "T29",
+      "title": "Deploy Backend & AI Services to Production",
+      "track": "devops",
+      "description": "Execute final production deployment of backend and AI services using CI/CD.",
+      "dependencies": [
+        "T27",
+        "T22"
+      ],
+      "assigned_to": "Arnav"
+    },
+    {
+      "id": "T30",
+      "title": "Launch Mobile App to App Stores",
+      "track": "mobile",
+      "description": "Submit the mobile application to Apple App Store and Google Play Store.",
+      "dependencies": [
+        "T28",
+        "T29"
+      ],
+      "assigned_to": "Prince"
+    }
+  ]
+}
