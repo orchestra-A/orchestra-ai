@@ -12,7 +12,7 @@ from google.genai import types # for typed generation config
 load_dotenv()
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-MODEL_NAME = "gemini-1.5-flash-8b"
+MODEL_NAME = "gemini-2.5-flash"
 
 PROMPT_TEMPLATE = """You are a senior software architect. Break the following app idea
 into a structured project blueprint.
