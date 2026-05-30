@@ -91,17 +91,17 @@ def collect_dependency_chain(
     if visited is None:
         visited = set()
 
-    if task_id in visited or task_id not in task_index:
+    if task_id not in task_index:
         return []
 
-    visited.add(task_id)
     task = task_index[task_id]
     chain: list[str] = []
 
     for dep_id in task.get("dependencies", []):
         dep_id = str(dep_id)
         chain.extend(collect_dependency_chain(dep_id, task_index, visited))
-        if dep_id not in chain:
+        if dep_id not in visited:
+            visited.add(dep_id)
             chain.append(dep_id)
 
     return chain
