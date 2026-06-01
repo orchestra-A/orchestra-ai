@@ -100,7 +100,7 @@ Tasks stored in the Neo4j knowledge graph use this node structure:
   "title": "string",
   "track": "string",
   "assigned_to": "member_name",
-  "status": "pending | in_progress | complete"
+  "status": "todo | in_progress | completed | blocked"
 }
 ```
 
@@ -113,7 +113,7 @@ Tasks stored in the Neo4j knowledge graph use this node structure:
 | `title` | string | Task title — must match the AI Output Format `title` |
 | `track` | string | Work category — must match the AI Output Format `track` |
 | `assigned_to` | string | Assigned team member — must match the AI Output Format `assigned_to` |
-| `status` | string | Current task status. One of: `pending`, `in_progress`, `complete` |
+| `status` | string | Current task status. One of: `todo`, `in_progress`, `completed`, `blocked` |
 
 ### Relationship Types
 
