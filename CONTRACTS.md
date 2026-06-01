@@ -15,10 +15,14 @@ Each task in the AI-generated roadmap follows this structure:
 {
   "id": "T1",
   "title": "string",
-  "track": "string (dynamic, e.g. frontend, backend, AI, devops)",
   "description": "string",
-  "dependencies": ["T0"],
-  "assigned_to": "member_name"
+  "status": "todo",
+  "assigned_to": "member_name",
+  "platform": "string",
+  "priority": "string",
+  "project_id": "string",
+  "created_at": "2026-05-28T10:00:00",
+  "updated_at": "2026-05-28T10:00:00"
 }
 ```
 
@@ -28,10 +32,14 @@ Each task in the AI-generated roadmap follows this structure:
 |---|---|---|
 | `id` | string | Unique task identifier (e.g. `T1`, `T2`) |
 | `title` | string | Short, human-readable task name |
-| `track` | string | Work category — dynamically determined by the AI based on the app idea (e.g. `frontend`, `backend`, `AI`, `devops`, `mobile`, `design`) |
 | `description` | string | Detailed explanation of what the task involves |
-| `dependencies` | string[] | List of task IDs that must be completed before this task can start. Empty array if none. |
+| `status` | string | Current task status. One of: `todo`, `in_progress`, `completed`, `blocked` |
 | `assigned_to` | string | Name of the team member assigned to this task (added by `assign.py`) |
+| `platform` | string | Target platform or surface area for the task (e.g. `web`, `mobile`, `backend`) |
+| `priority` | string | Task priority level (e.g. `low`, `medium`, `high`) |
+| `project_id` | string | Identifier linking the task to its parent project |
+| `created_at` | string | ISO 8601 datetime when the task was created |
+| `updated_at` | string | ISO 8601 datetime when the task was last updated |
 
 ### Full Document Shape
 
@@ -92,7 +100,7 @@ Tasks stored in the Neo4j knowledge graph use this node structure:
   "title": "string",
   "track": "string",
   "assigned_to": "member_name",
-  "status": "pending | in_progress | complete"
+  "status": "todo | in_progress | completed | blocked"
 }
 ```
 
@@ -105,7 +113,7 @@ Tasks stored in the Neo4j knowledge graph use this node structure:
 | `title` | string | Task title — must match the AI Output Format `title` |
 | `track` | string | Work category — must match the AI Output Format `track` |
 | `assigned_to` | string | Assigned team member — must match the AI Output Format `assigned_to` |
-| `status` | string | Current task status. One of: `pending`, `in_progress`, `complete` |
+| `status` | string | Current task status. One of: `todo`, `in_progress`, `completed`, `blocked` |
 
 ### Relationship Types
 
