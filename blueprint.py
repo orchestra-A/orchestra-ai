@@ -4,6 +4,7 @@ import json # for parsing the JSON response
 import os # for reading environment variables
 import re # for regular expressions
 import sys # for command line arguments
+from datetime import datetime, timezone # for ISO timestamps
 
 from dotenv import load_dotenv # for loading .env files
 from google import genai # for generating the blueprint
@@ -31,7 +32,13 @@ comments, or any text outside the JSON. The JSON must match this exact schema:
       "title": "string",
       "track": "string",
       "description": "string",
-      "dependencies": ["T0", "..."]
+      "dependencies": ["T0", "..."],
+      "status": "todo",
+      "priority": "high" | "medium" | "low",
+      "project_id": "P1",
+      "created_at": "2026-06-02T14:35:00+00:00",
+      "updated_at": "2026-06-02T14:35:00+00:00",
+      "platform": "github"
     }}
   ]
 }}
@@ -42,6 +49,9 @@ Rules:
 - Use concise, descriptive track names such as "frontend", "backend", "AI", "mobile", "devops", "database", "design", "qa", "security", etc.
 - Keep track naming consistent across tasks.
 - "dependencies" is an array of task ids this task depends on (use [] if none).
+- "status" must always be "todo".
+- "priority" must be exactly one of: "high", "medium", "low", based on task importance.
+- "project_id" must always be "P1".
 - Cover the full stack needed to ship the idea (UI, APIs, data, AI/ML pieces).
 - Output JSON only. No explanations."""
 
@@ -79,7 +89,15 @@ def generate_blueprint(idea: str) -> dict:
     )
     raw = response.text or ""
     payload = extract_json(raw)
-    return json.loads(payload)
+    blueprint = json.loads(payload)
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    for task in blueprint.get("tasks", []):
+        task["created_at"] = now_iso
+        task["updated_at"] = now_iso
+        task["platform"] = "github"
+
+    return blueprint
 
 
 def main() -> None:
