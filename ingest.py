@@ -13,12 +13,23 @@ from dotenv import load_dotenv
 from neo4j import GraphDatabase
 
 ASSIGNED_FILE = "assigned.json"
+SKILL_GAP_FILE = "skill_gap_report.json"
 SKILLS_FILE = "skills.json"
 DEFAULT_STATUS = "todo"
 
 
+def resolve_task_source() -> str:
+    """Pick the richest available task file.
+
+    skill_gap_report.json is a superset of assigned.json — same task fields
+    plus gap_detected / missing_skill_or_role — so prefer it when present and
+    fall back to assigned.json otherwise.
+    """
+    return SKILL_GAP_FILE if os.path.exists(SKILL_GAP_FILE) else ASSIGNED_FILE
+
+
 def load_tasks(path: str) -> list[dict]:
-    """Read the assigned roadmap tasks from JSON file."""
+    """Read the roadmap tasks from JSON file."""
     with open(path, "r", encoding="utf-8") as file:
         payload = json.load(file)
     return payload.get("tasks", [])
@@ -47,15 +58,25 @@ def create_constraints(session) -> None:
 
 
 def ingest_tasks(session, tasks: list[dict]) -> None:
-    """MERGE Task nodes with their core properties."""
+    """MERGE Task nodes with the properties defined in CONTRACTS.md §3.
+
+    Node shape: node_type, id, title, track, assigned_to, status. We also carry
+    the optional skill-gap fields (gap_detected, missing_skill_or_role) when the
+    source file provides them. Setting a property to null removes it in Neo4j,
+    so tasks without a gap simply won't have those properties.
+    """
     session.run(
         """
         UNWIND $tasks AS task
         MERGE (t:Task {id: task.id})
-        SET t.title = task.title,
+        SET t.node_type = 'Task',
+            t.title = task.title,
             t.track = task.track,
             t.description = task.description,
-            t.status = coalesce(task.status, $default_status)
+            t.assigned_to = task.assigned_to,
+            t.status = coalesce(task.status, $default_status),
+            t.gap_detected = task.gap_detected,
+            t.missing_skill_or_role = task.missing_skill_or_role
         """,
         tasks=tasks,
         default_status=DEFAULT_STATUS,
@@ -120,8 +141,11 @@ def print_summary(session) -> None:
         OPTIONAL MATCH (:Developer)-[a:ASSIGNED_TO]->(:Task)
         WITH tasks, developers, skills, depends_on, count(a) AS assigned_to
         OPTIONAL MATCH (:Developer)-[h:HAS_SKILL]->(:Skill)
+        WITH tasks, developers, skills, depends_on, assigned_to,
+             count(h) AS has_skill
+        OPTIONAL MATCH (g:Task) WHERE g.gap_detected = true
         RETURN tasks, developers, skills, depends_on, assigned_to,
-               count(h) AS has_skill
+               has_skill, count(g) AS skill_gaps
         """
     ).single()
 
@@ -132,6 +156,7 @@ def print_summary(session) -> None:
     print(f"  DEPENDS_ON edges:     {counts['depends_on']}")
     print(f"  ASSIGNED_TO edges:    {counts['assigned_to']}")
     print(f"  HAS_SKILL edges:      {counts['has_skill']}")
+    print(f"  Tasks w/ skill gap:   {counts['skill_gaps']}")
 
 
 def main() -> None:
@@ -149,9 +174,11 @@ def main() -> None:
             "Add them to a .env file in the project root."
         )
 
-    tasks = load_tasks(ASSIGNED_FILE)
+    source = resolve_task_source()
+    tasks = load_tasks(source)
     if not tasks:
-        raise RuntimeError(f"No tasks found in {ASSIGNED_FILE}.")
+        raise RuntimeError(f"No tasks found in {source}.")
+    print(f"Loading tasks from {source}")
     skills = load_skills(SKILLS_FILE)
 
     driver = GraphDatabase.driver(uri, auth=(username, password))

@@ -13,7 +13,8 @@ import os
 from dotenv import load_dotenv
 from neo4j import GraphDatabase
 
-DONE_STATUS = "done"
+# Status enum per CONTRACTS.md §3: todo | in_progress | completed | blocked.
+DONE_STATUS = "completed"
 
 
 def summary(session) -> None:
@@ -122,6 +123,28 @@ def most_blocking_tasks(session, limit: int = 5) -> None:
         print("  (no dependencies in graph)")
 
 
+def skill_gaps(session) -> None:
+    """Tasks flagged with a skill gap — assignee lacks a needed skill/role."""
+    rows = session.run(
+        """
+        MATCH (t:Task)
+        WHERE t.gap_detected = true
+        RETURN t.id AS id, t.title AS title,
+               coalesce(t.assigned_to, 'unassigned') AS owner,
+               t.missing_skill_or_role AS missing
+        ORDER BY t.id
+        """
+    )
+    print("\n=== Skill gaps (assignee missing a needed skill/role) ===")
+    found = False
+    for row in rows:
+        found = True
+        print(f"  [{row['id']}] {row['title']}  ->  {row['owner']} "
+              f"(needs: {row['missing']})")
+    if not found:
+        print("  (no skill gaps flagged)")
+
+
 def main() -> None:
     load_dotenv()
     uri = os.getenv("NEO4J_URI")
@@ -144,6 +167,7 @@ def main() -> None:
             assignments_per_developer(session)
             developer_skills(session)
             most_blocking_tasks(session)
+            skill_gaps(session)
     finally:
         driver.close()
 
