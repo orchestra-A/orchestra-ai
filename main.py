@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from assign import OUTPUT_FILE as ASSIGNED_FILE
 from assign import assign_tasks, load_json_file
 from blueprint import generate_blueprint
+from graph_query import build_reactflow_graph
 from search import (
     CHROMA_PATH,
     COLLECTION_NAME,
@@ -155,6 +156,33 @@ def get_tasks() -> dict[str, Any]:
         raise HTTPException(status_code=404, detail="assigned.json not found.") from exc
 
     return assigned
+
+
+@app.get("/graph")
+def graph(
+    developers: bool = Query(
+        True, description="Include Developer nodes and ASSIGNED_TO edges"
+    ),
+    skills: bool = Query(
+        True, description="Include Skill nodes and HAS_SKILL edges"
+    ),
+) -> dict[str, Any]:
+    """Return the Neo4j task graph as ReactFlow-ready nodes and edges.
+
+    Shape: {"nodes": [...], "edges": [...]} — drop straight into
+    <ReactFlow nodes edges />. Toggle `developers` / `skills` to narrow the
+    view down to just the task dependency DAG.
+    """
+    try:
+        return build_reactflow_graph(
+            include_developers=developers, include_skills=skills
+        )
+    except RuntimeError as exc:  # missing NEO4J_* env vars
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except Exception as exc:  # Neo4j unavailable / query failure
+        raise HTTPException(
+            status_code=503, detail=f"Graph database error: {exc}"
+        ) from exc
 
 
 if __name__ == "__main__":
