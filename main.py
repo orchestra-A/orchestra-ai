@@ -11,10 +11,11 @@ from google import genai
 from pydantic import BaseModel
 
 from assign import OUTPUT_FILE as ASSIGNED_FILE
-from assign import assign_tasks, load_json_file
+from assign import assign_tasks
 from blueprint import generate_blueprint
 from clover import ask_clover, search_top_tasks
 from graph_query import build_reactflow_graph
+from query import get_all_tasks
 from search import (
     CHROMA_PATH,
     COLLECTION_NAME,
@@ -170,14 +171,21 @@ def clover(body: CloverRequest) -> dict[str, str]:
 
 
 @app.get("/tasks")
-def get_tasks() -> dict[str, Any]:
-    """Return all tasks from assigned.json."""
-    try:
-        assigned = load_json_file(ASSIGNED_FILE)
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail="assigned.json not found.") from exc
+def get_tasks() -> list[dict[str, Any]]:
+    """Return every task from the Neo4j graph in CONTRACTS.md shape.
 
-    return assigned
+    Each task: id, title, track, description, status, assigned_to,
+    dependencies (array of task ids), created_at, updated_at. This is the
+    endpoint Member 3 (Arnav) consumes from his backend server.
+    """
+    try:
+        return get_all_tasks()
+    except RuntimeError as exc:  # missing NEO4J_* env vars
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except Exception as exc:  # Neo4j unavailable / query failure
+        raise HTTPException(
+            status_code=503, detail=f"Graph database error: {exc}"
+        ) from exc
 
 
 @app.get("/graph")
@@ -210,4 +218,9 @@ def graph(
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    PORT = 8000
+    print(f"Orchestra + Clover API running at http://localhost:{PORT}")
+    print(f"  Task list (for Arnav):  http://localhost:{PORT}/tasks")
+    print(f"  ReactFlow graph:        http://localhost:{PORT}/graph")
+    print(f"  Interactive docs:       http://localhost:{PORT}/docs")
+    uvicorn.run("main:app", host="0.0.0.0", port=PORT, reload=True)
