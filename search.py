@@ -74,6 +74,10 @@ def index_tasks(collection, embed_client: genai.Client, tasks: list[dict]) -> No
                 "track": str(task.get("track", "")),
                 "assigned_to": str(task.get("assigned_to", "")),
                 "description": str(task.get("description", "")),
+                "priority": str(task.get("priority", "")),
+                "status": str(task.get("status", "")),
+                "dependencies": json.dumps(task.get("dependencies", [])),
+                "project_id": str(task.get("project_id", "")),
             }
         )
 
