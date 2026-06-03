@@ -145,6 +145,62 @@ def skill_gaps(session) -> None:
         print("  (no skill gaps flagged)")
 
 
+def _task_sort_key(task_id: str) -> tuple:
+    """Sort 'T2' before 'T10' by ordering on the numeric suffix when present."""
+    digits = "".join(ch for ch in task_id if ch.isdigit())
+    return (0, int(digits)) if digits else (1, task_id)
+
+
+def get_all_tasks() -> list[dict]:
+    """Return every task as a clean JSON-serialisable record.
+
+    Field names match CONTRACTS.md exactly: id, title, track, description,
+    status, assigned_to, dependencies (array of task ids), created_at,
+    updated_at. Opens and closes its own driver so callers (e.g. the FastAPI
+    /tasks endpoint) can use it as a one-shot function.
+    """
+    load_dotenv()
+    uri = os.getenv("NEO4J_URI")
+    username = os.getenv("NEO4J_USERNAME")
+    password = os.getenv("NEO4J_PASSWORD")
+    database = os.getenv("NEO4J_DATABASE") or None
+
+    if not all([uri, username, password]):
+        raise RuntimeError(
+            "NEO4J_URI, NEO4J_USERNAME and NEO4J_PASSWORD must be set. "
+            "Add them to a .env file in the project root."
+        )
+
+    driver = GraphDatabase.driver(uri, auth=(username, password))
+    try:
+        driver.verify_connectivity()
+        with driver.session(database=database) as session:
+            rows = session.run(
+                """
+                MATCH (t:Task)
+                OPTIONAL MATCH (t)-[:DEPENDS_ON]->(dep:Task)
+                WITH t, [d IN collect(dep.id) WHERE d IS NOT NULL] AS dependencies
+                RETURN t.id AS id,
+                       t.title AS title,
+                       t.track AS track,
+                       t.description AS description,
+                       t.status AS status,
+                       t.assigned_to AS assigned_to,
+                       dependencies,
+                       t.created_at AS created_at,
+                       t.updated_at AS updated_at
+                """
+            )
+            tasks = [dict(row) for row in rows]
+    finally:
+        driver.close()
+
+    for task in tasks:
+        task["dependencies"] = sorted(task["dependencies"], key=_task_sort_key)
+    tasks.sort(key=lambda t: _task_sort_key(t["id"]))
+    return tasks
+
+
 def main() -> None:
     load_dotenv()
     uri = os.getenv("NEO4J_URI")

@@ -19,13 +19,14 @@ DEFAULT_STATUS = "todo"
 
 
 def resolve_task_source() -> str:
-    """Pick the richest available task file.
+    """Pick the task file to ingest.
 
-    skill_gap_report.json is a superset of assigned.json — same task fields
-    plus gap_detected / missing_skill_or_role — so prefer it when present and
-    fall back to assigned.json otherwise.
+    assigned.json is the single source of truth (CONTRACTS.md §1): it carries
+    the full field set — status, created_at, updated_at, platform, priority,
+    project_id — with assignments across all five developers. We fall back to
+    skill_gap_report.json only if assigned.json is missing.
     """
-    return SKILL_GAP_FILE if os.path.exists(SKILL_GAP_FILE) else ASSIGNED_FILE
+    return ASSIGNED_FILE if os.path.exists(ASSIGNED_FILE) else SKILL_GAP_FILE
 
 
 def load_tasks(path: str) -> list[dict]:
@@ -60,10 +61,12 @@ def create_constraints(session) -> None:
 def ingest_tasks(session, tasks: list[dict]) -> None:
     """MERGE Task nodes with the properties defined in CONTRACTS.md §3.
 
-    Node shape: node_type, id, title, track, assigned_to, status. We also carry
-    the optional skill-gap fields (gap_detected, missing_skill_or_role) when the
-    source file provides them. Setting a property to null removes it in Neo4j,
-    so tasks without a gap simply won't have those properties.
+    Node shape: node_type, id, title, track, assigned_to, status (CONTRACTS.md
+    §3). We also carry description plus the created_at / updated_at timestamps so
+    query.py can return the full task record, and the optional skill-gap fields
+    (gap_detected, missing_skill_or_role) when the source file provides them.
+    Setting a property to null removes it in Neo4j, so tasks without a gap (or
+    without timestamps) simply won't have those properties.
     """
     session.run(
         """
@@ -75,6 +78,8 @@ def ingest_tasks(session, tasks: list[dict]) -> None:
             t.description = task.description,
             t.assigned_to = task.assigned_to,
             t.status = coalesce(task.status, $default_status),
+            t.created_at = task.created_at,
+            t.updated_at = task.updated_at,
             t.gap_detected = task.gap_detected,
             t.missing_skill_or_role = task.missing_skill_or_role
         """,
