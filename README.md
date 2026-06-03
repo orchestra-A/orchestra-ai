@@ -1,39 +1,114 @@
 # Orchestra + Clover
 
-Orchestra + Clover is a Python AI service that takes a raw app idea and turns it into a structured JSON engineering roadmap.
+**AI-powered project manager** — turn a raw app idea into a dependency-locked engineering roadmap, auto-assign work to your team, and ask Clover anything about the project in plain English.
 
-It generates:
-- A project name
-- A list of tasks with:
-  - `id`
-  - `title`
-  - `track` (`frontend`, `backend`, or `AI`)
-  - `description`
-  - `dependencies`
+---
 
 ## What It Does
 
-Given a plain-English app concept, the service sends a prompt to Gemini and returns clean JSON you can directly use for planning and execution.
+- **Roadmap generation** — Takes a raw app idea and produces a structured, dependency-aware engineering roadmap with full task metadata.
+- **Smart assignment** — Auto-assigns tasks to team members based on skill profiles and task type.
+- **Clover AI assistant** — Answers natural language questions about the project using ChromaDB semantic search and a Neo4j knowledge graph for rich project context.
 
-The roadmap is designed to help teams break down work into clear, dependency-aware tasks across frontend, backend, and AI tracks.
+---
+
+## Pipeline Overview
+
+```
+App idea → blueprint.py → assign.py → assigned.json
+                ↓              ↓
+           skills.json    Neo4j graph (ingest)
+                ↓              ↓
+         search.py / clover.py / commit_intel.py / skill_gap.py / dependency_query.py
+                ↓
+            main.py (FastAPI)
+```
+
+---
+
+## Scripts
+
+| Script | Purpose |
+|--------|---------|
+| `blueprint.py` | App idea → structured JSON roadmap with all task fields (`id`, `title`, `track`, `description`, `dependencies`, `status`, `priority`, `project_id`, timestamps, `platform`) |
+| `skills.py` | Collects team member skill profiles interactively and saves to `skills.json` |
+| `assign.py` | Auto-assigns tasks to the best-fit team member using Gemini |
+| `search.py` | RAG semantic search over tasks via ChromaDB + Gemini embeddings |
+| `commit_intel.py` | Links GitHub commits to roadmap tasks automatically and stores enriched events in ChromaDB |
+| `skill_gap.py` | Detects missing skills per task and flags gaps in `skill_gap_report.json` |
+| `dependency_query.py` | Natural language dependency chain querying with recursive blocker tracing |
+| `clover.py` | Conversational AI assistant — RAG retrieval + Gemini answers with task IDs, titles, and assignee names |
+| `main.py` | FastAPI server exposing the pipeline as REST endpoints (CORS enabled for frontend) |
+
+Supporting modules: `ingest.py`, `query.py`, and `graph_query.py` handle Neo4j ingestion and graph queries.
+
+---
+
+## API Endpoints
+
+Start the server:
+
+```bash
+python main.py
+```
+
+Interactive docs: http://localhost:8000/docs
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/blueprint` | Generate roadmap from `{"idea": "string"}` |
+| `POST` | `/assign` | Assign tasks from `{"tasks": [...], "skills": {...}}` |
+| `GET` | `/search` | Top 3 semantic matches — `?question=...` |
+| `POST` | `/clover` | Conversational answer — `{"question": "string"}` → `{"answer": "string"}` |
+| `GET` | `/tasks` | All tasks from the Neo4j graph |
+| `GET` | `/graph` | ReactFlow-ready `nodes` + `edges` for the project graph |
+
+### Examples
+
+```bash
+curl -X POST http://localhost:8000/blueprint \
+  -H "Content-Type: application/json" \
+  -d '{"idea": "An AI app that suggests recipes from fridge photos"}'
+
+curl -X POST http://localhost:8000/clover \
+  -H "Content-Type: application/json" \
+  -d '{"question": "Who is working on frontend tasks?"}'
+
+curl "http://localhost:8000/search?question=authentication%20backend"
+
+curl http://localhost:8000/graph
+```
+
+---
 
 ## Tech Stack
 
-- Python
-- [`google-genai`](https://pypi.org/project/google-genai/)
-- [`python-dotenv`](https://pypi.org/project/python-dotenv/)
+| Layer | Technology |
+|-------|------------|
+| Language | Python |
+| AI | [google-genai](https://pypi.org/project/google-genai/) (`gemini-2.5-flash`, `models/gemini-embedding-001`) |
+| Config | [python-dotenv](https://pypi.org/project/python-dotenv/) |
+| API | FastAPI + Uvicorn |
+| Vector search | ChromaDB |
+| Knowledge graph | Neo4j |
 
-## Project Structure
+---
 
-- `blueprint.py` - Main script that:
-  - Loads `GEMINI_API_KEY` from `.env`
-  - Sends the raw app idea to Gemini (`gemini-2.5-flash`)
-  - Enforces JSON-only output
-  - Parses and pretty-prints the final roadmap JSON
+## Neo4j Graph
+
+The project knowledge graph stores:
+
+- **30** task nodes
+- **5** developer nodes
+- Relationships: `ASSIGNED_TO`, `DEPENDS_ON`, `HAS_SKILL`
+
+`GET /graph` returns the full graph as ReactFlow-ready JSON for Prince's frontend. `GET /tasks` returns all tasks in the agreed contract shape for downstream integrations.
+
+---
 
 ## Setup
 
-1. Create and activate a virtual environment (recommended):
+1. Create and activate a virtual environment:
 
 ```bash
 python -m venv .venv
@@ -43,48 +118,38 @@ source .venv/bin/activate
 2. Install dependencies:
 
 ```bash
-pip install google-genai python-dotenv
+pip install -r requirements.txt
 ```
 
-3. Add your API key to `.env`:
+3. Configure environment variables in `.env`:
 
 ```env
 GEMINI_API_KEY=your_api_key_here
+
+# Neo4j (for /tasks, /graph, ingest)
+NEO4J_URI=bolt://localhost:7687
+NEO4J_USER=neo4j
+NEO4J_PASSWORD=your_password
 ```
 
-## Usage
-
-Run with your app idea as an argument:
+4. Run individual scripts or the API:
 
 ```bash
-python blueprint.py "An app that converts meeting recordings into actionable sprint tasks."
+python blueprint.py "Your app idea here"
+python skills.py
+python assign.py
+python clover.py "What tasks are blocked?"
+python main.py
 ```
 
-If no argument is provided, `blueprint.py` uses its built-in sample idea.
+Data contracts for all shared formats are documented in [`CONTRACTS.md`](CONTRACTS.md).
 
-## Output Format
-
-The service returns JSON in this shape:
-
-```json
-{
-  "project_name": "string",
-  "tasks": [
-    {
-      "id": "T1",
-      "title": "string",
-      "track": "frontend",
-      "description": "string",
-      "dependencies": []
-    }
-  ]
-}
-```
-
-`track` is automatically determined by the AI based on the type 
-of work involved. Examples: `frontend`, `backend`, `AI`, `mobile`, 
-`devops`, `database`, `design`, `qa`, `security`, etc.
+---
 
 ## Current Status
 
-- Week 1: Complete
+**Weeks 1–3 complete.** Full AI pipeline is live — roadmap generation, assignment, RAG search, commit intelligence, skill gap analysis, dependency queries, Clover assistant, and FastAPI + Neo4j integration.
+
+---
+
+*Orchestra + Clover Team — 2026*
