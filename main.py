@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from assign import OUTPUT_FILE as ASSIGNED_FILE
 from assign import assign_tasks, load_json_file
 from blueprint import generate_blueprint
+from clover import ask_clover, search_top_tasks
 from graph_query import build_reactflow_graph
 from search import (
     CHROMA_PATH,
@@ -42,6 +43,10 @@ class BlueprintRequest(BaseModel):
 class AssignRequest(BaseModel):
     tasks: list[dict[str, Any]]
     skills: dict[str, list[str]]
+
+
+class CloverRequest(BaseModel):
+    question: str
 
 
 def get_api_key() -> str:
@@ -145,6 +150,23 @@ def search(
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     return {"question": question.strip(), "matches": matches}
+
+
+@app.post("/clover")
+def clover(body: CloverRequest) -> dict[str, str]:
+    """Answer a project question using RAG task context and Clover."""
+    if not body.question.strip():
+        raise HTTPException(status_code=400, detail="question cannot be empty.")
+
+    api_key = get_api_key()
+
+    try:
+        relevant_tasks = search_top_tasks(body.question.strip(), api_key)
+        answer = ask_clover(body.question.strip(), relevant_tasks, api_key)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    return {"answer": answer}
 
 
 @app.get("/tasks")
