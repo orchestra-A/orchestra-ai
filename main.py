@@ -15,6 +15,7 @@ from assign import OUTPUT_FILE as ASSIGNED_FILE
 from assign import assign_tasks
 from blueprint import generate_blueprint
 from clover import ask_clover, search_top_tasks
+from commit_intel import fetch_live_events, main as run_commit_intel
 from graph_query import build_reactflow_graph
 from onboarding import build_profile
 from query import get_all_tasks
@@ -231,6 +232,18 @@ def replan() -> dict[str, Any]:
         )
 
     return {"suggestions": suggestions}
+
+
+@app.get("/commit-intel")
+def commit_intel() -> dict[str, Any]:
+    """Fetch live commit events from the Orchestra backend."""
+    try:
+        events = fetch_live_events()
+        if not events:
+            return {"total": 0, "events": [], "message": "No live events found."}
+        return {"total": len(events), "events": events}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.post("/onboarding")
