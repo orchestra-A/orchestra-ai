@@ -54,12 +54,21 @@ python main.py
 
 Interactive docs: http://localhost:8000/docs
 
+Deployed API: https://orchestra-ai-production.up.railway.app
+
 | Method | Endpoint | Description |
 |--------|----------|-------------|
+| `GET` | `/health` | Returns API status and timestamp |
+| `GET` | `/team` | Returns team skill profiles from `skills.json` |
+| `GET` | `/project` | Returns project summary with task counts by status, person, and track |
 | `POST` | `/blueprint` | Generate roadmap from `{"idea": "string"}` |
 | `POST` | `/assign` | Assign tasks from `{"tasks": [...], "skills": {...}}` |
 | `GET` | `/search` | Top 3 semantic matches — `?question=...` |
 | `POST` | `/clover` | Conversational answer — `{"question": "string"}` → `{"answer": "string"}` |
+| `GET` | `/standup` | Generates daily standup summary |
+| `GET` | `/replan` | Suggests re-planning for blocked tasks |
+| `GET` | `/commit-intel` | Fetches live events from Discord and GitHub |
+| `POST` | `/onboarding` | Scans GitHub profile and auto-assigns tasks |
 | `GET` | `/tasks` | All tasks from the Neo4j graph |
 | `GET` | `/graph` | ReactFlow-ready `nodes` + `edges` for the project graph |
 
