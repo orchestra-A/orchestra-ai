@@ -260,7 +260,14 @@ def standup() -> dict[str, str]:
         raise HTTPException(status_code=404, detail="No tasks found in assigned.json.")
 
     grouped = group_tasks_by_person(tasks)
-    standup_text = generate_standup(grouped, assigned.get("project_name", "Project"), api_key)
+    try:
+        standup_text = generate_standup(
+            grouped, assigned.get("project_name", "Project"), api_key
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500, detail=f"Standup generation failed: {str(exc)}"
+        ) from exc
     return {"standup": standup_text}
 
 
@@ -288,9 +295,12 @@ def replan() -> dict[str, Any]:
     for blocked_task in blocked_tasks:
         blocked_id = str(blocked_task.get("id", ""))
         dependents = find_dependents(blocked_id, tasks)
-        suggestions.append(
-            suggest_replan(blocked_task, dependents, tasks, project_name, api_key)
-        )
+        try:
+            suggestions.append(
+                suggest_replan(blocked_task, dependents, tasks, project_name, api_key)
+            )
+        except Exception as exc:
+            suggestions.append({"error": str(exc), "blocked_task_id": blocked_id})
 
     return {"suggestions": suggestions}
 
