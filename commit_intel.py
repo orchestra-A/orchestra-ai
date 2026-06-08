@@ -7,11 +7,12 @@ import re
 import sys
 
 import chromadb
+import requests
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
 
-MODEL_NAME = "gemini-2.5-flash"
+MODEL_NAME = "gemini-2.0-flash-lite"
 EMBEDDING_MODEL = "models/gemini-embedding-001"
 ASSIGNED_FILE = "assigned.json"
 COLLECTION_NAME = "commits"
@@ -62,31 +63,25 @@ def load_json_file(path: str) -> dict:
         return json.load(file)
 
 
-def load_event() -> dict:
-    """Load normalized event JSON from CLI arg, file path, stdin, or sample."""
-    if len(sys.argv) > 1:
-        arg = sys.argv[1]
-        if os.path.isfile(arg):
-            return load_json_file(arg)
-        return json.loads(arg)
-
-    if not sys.stdin.isatty():
-        payload = sys.stdin.read().strip()
-        if payload:
-            return json.loads(payload)
-
-    return {
-        "platform": "github",
-        "member": "Arnav",
-        "action": "commit",
-        "timestamp": "2026-05-28T12:00:00Z",
-        "details": "Initialize backend API framework and configure Express server",
-    }
+def fetch_live_events() -> list:
+    """Fetch live normalized events from the Orchestra backend."""
+    try:
+        response = requests.get(
+            "https://orchestra-backend-2v5a.onrender.com/events",
+            timeout=30,
+        )
+        response.raise_for_status()
+        data = response.json()
+        if data.get("total", 0) == 0:
+            return []
+        return data.get("events", [])
+    except Exception:
+        return []
 
 
 def validate_event(event: dict) -> None:
     """Ensure required normalized event fields are present."""
-    required = ("platform", "member", "action", "timestamp", "details")
+    required = ("platform", "actor", "event_type", "timestamp", "action_summary")
     missing = [field for field in required if field not in event]
     if missing:
         raise ValueError(f"Event is missing required fields: {', '.join(missing)}")
@@ -138,10 +133,10 @@ def enriched_to_text(enriched: dict) -> str:
     """Convert enriched commit into searchable text for embeddings."""
     return (
         f"Platform: {enriched.get('platform', '')}\n"
-        f"Member: {enriched.get('member', '')}\n"
-        f"Action: {enriched.get('action', '')}\n"
+        f"Actor: {enriched.get('actor', '')}\n"
+        f"Event type: {enriched.get('event_type', '')}\n"
         f"Timestamp: {enriched.get('timestamp', '')}\n"
-        f"Details: {enriched.get('details', '')}\n"
+        f"Action summary: {enriched.get('action_summary', '')}\n"
         f"Linked task: [{enriched.get('linked_task_id', '')}] "
         f"{enriched.get('linked_task_title', '')}\n"
         f"Reason: {enriched.get('reason', '')}"
@@ -172,10 +167,10 @@ def store_in_chroma(collection, client: genai.Client, enriched: dict) -> None:
         metadatas=[
             {
                 "platform": str(enriched.get("platform", "")),
-                "member": str(enriched.get("member", "")),
-                "action": str(enriched.get("action", "")),
+                "actor": str(enriched.get("actor", "")),
+                "event_type": str(enriched.get("event_type", "")),
                 "timestamp": str(enriched.get("timestamp", "")),
-                "details": str(enriched.get("details", "")),
+                "action_summary": str(enriched.get("action_summary", "")),
                 "linked_task_id": str(enriched.get("linked_task_id", "")),
                 "linked_task_title": str(enriched.get("linked_task_title", "")),
                 "reason": str(enriched.get("reason", "")),
@@ -189,10 +184,10 @@ def print_enriched(enriched: dict) -> None:
     print("\nEnriched Commit Event")
     print("=" * 40)
     print(f"Platform:          {enriched.get('platform', '')}")
-    print(f"Member:            {enriched.get('member', '')}")
-    print(f"Action:            {enriched.get('action', '')}")
+    print(f"Actor:             {enriched.get('actor', '')}")
+    print(f"Event type:        {enriched.get('event_type', '')}")
     print(f"Timestamp:         {enriched.get('timestamp', '')}")
-    print(f"Details:           {enriched.get('details', '')}")
+    print(f"Action summary:    {enriched.get('action_summary', '')}")
     print(f"Linked Task ID:    {enriched.get('linked_task_id', '')}")
     print(f"Linked Task Title: {enriched.get('linked_task_title', '')}")
     print(f"Reason:            {enriched.get('reason', '')}")
@@ -209,8 +204,10 @@ def main() -> None:
             "GEMINI_API_KEY is not set. Add it to a .env file in the project root."
         )
 
-    event = load_event()
-    validate_event(event)
+    events = fetch_live_events()
+    if not events:
+        print("No live events found.")
+        return
 
     assigned = load_json_file(ASSIGNED_FILE)
     tasks = assigned.get("tasks", [])
@@ -218,15 +215,16 @@ def main() -> None:
         raise RuntimeError("No tasks found in assigned.json.")
 
     client = genai.Client(api_key=api_key)
-    link = link_event_to_task(event, tasks, client)
-
-    enriched = {**event, **link}
 
     chroma_client = chromadb.PersistentClient(path=CHROMA_PATH)
     collection = chroma_client.get_or_create_collection(name=COLLECTION_NAME)
-    store_in_chroma(collection, client, enriched)
 
-    print_enriched(enriched)
+    for event in events:
+        validate_event(event)
+        link = link_event_to_task(event, tasks, client)
+        enriched = {**event, **link}
+        store_in_chroma(collection, client, enriched)
+        print_enriched(enriched)
 
 
 if __name__ == "__main__":
