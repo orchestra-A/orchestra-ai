@@ -23,6 +23,13 @@ from search import (
     index_tasks,
     load_assigned_tasks,
 )
+from re_planner import (
+    find_blocked_tasks,
+    find_dependents,
+    load_assigned as load_replan_assigned,
+    suggest_replan,
+)
+from standup import generate_standup, group_tasks_by_person, load_assigned
 
 load_dotenv()
 
@@ -168,6 +175,56 @@ def clover(body: CloverRequest) -> dict[str, str]:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     return {"answer": answer}
+
+
+@app.get("/standup")
+def standup() -> dict[str, str]:
+    """Generate a daily standup update from assigned.json."""
+    api_key = get_api_key()
+
+    try:
+        assigned = load_assigned(ASSIGNED_FILE)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="assigned.json not found.") from exc
+
+    tasks = assigned.get("tasks", [])
+    if not tasks:
+        raise HTTPException(status_code=404, detail="No tasks found in assigned.json.")
+
+    grouped = group_tasks_by_person(tasks)
+    standup_text = generate_standup(grouped, assigned.get("project_name", "Project"), api_key)
+    return {"standup": standup_text}
+
+
+@app.get("/replan")
+def replan() -> dict[str, Any]:
+    """Generate re-planning suggestions for all blocked tasks."""
+    api_key = get_api_key()
+
+    try:
+        assigned = load_replan_assigned(ASSIGNED_FILE)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="assigned.json not found.") from exc
+
+    tasks = assigned.get("tasks", [])
+    if not tasks:
+        raise HTTPException(status_code=404, detail="No tasks found in assigned.json.")
+
+    blocked_tasks = find_blocked_tasks(tasks)
+    if not blocked_tasks:
+        return {"suggestions": [], "message": "No blocked tasks found"}
+
+    project_name = assigned.get("project_name", "Project")
+    suggestions: list[dict[str, Any]] = []
+
+    for blocked_task in blocked_tasks:
+        blocked_id = str(blocked_task.get("id", ""))
+        dependents = find_dependents(blocked_id, tasks)
+        suggestions.append(
+            suggest_replan(blocked_task, dependents, tasks, project_name, api_key)
+        )
+
+    return {"suggestions": suggestions}
 
 
 @app.get("/tasks")
