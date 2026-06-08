@@ -1,5 +1,6 @@
 """FastAPI server for Orchestra + Clover."""
 
+import json
 import os
 from datetime import datetime
 from typing import Any
@@ -55,6 +56,22 @@ def health() -> dict[str, Any]:
         "endpoints": 12,
         "timestamp": datetime.utcnow().isoformat(),
     }
+
+
+@app.get("/team")
+def get_team() -> dict[str, Any]:
+    try:
+        with open("skills.json", "r", encoding="utf-8") as file:
+            skills = json.load(file)
+        team = [
+            {"name": name, "skills": skill_list}
+            for name, skill_list in skills.items()
+        ]
+        return {"team": team}
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="skills.json not found")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 class BlueprintRequest(BaseModel):
