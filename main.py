@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 from datetime import datetime
 from typing import Any
 
@@ -312,6 +313,11 @@ def onboarding(body: OnboardingRequest) -> dict[str, Any]:
     username = body.github_username.strip()
     if not username:
         raise HTTPException(status_code=400, detail="github_username cannot be empty.")
+
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", username):
+        raise HTTPException(status_code=400, detail="Invalid GitHub username format")
+    if len(username) > 39:
+        raise HTTPException(status_code=400, detail="GitHub username too long")
 
     api_key = get_api_key()
 
