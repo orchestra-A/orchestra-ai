@@ -74,6 +74,39 @@ def get_team() -> dict[str, Any]:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
+@app.get("/project")
+def get_project() -> dict[str, Any]:
+    try:
+        with open(ASSIGNED_FILE, "r", encoding="utf-8") as file:
+            data = json.load(file)
+
+        tasks = data.get("tasks", [])
+        by_status: dict[str, int] = {}
+        by_person: dict[str, int] = {}
+        by_track: dict[str, int] = {}
+
+        for task in tasks:
+            status = str(task.get("status", "unknown"))
+            person = str(task.get("assigned_to", "Unassigned"))
+            track = str(task.get("track", "unknown"))
+
+            by_status[status] = by_status.get(status, 0) + 1
+            by_person[person] = by_person.get(person, 0) + 1
+            by_track[track] = by_track.get(track, 0) + 1
+
+        return {
+            "project_name": data.get("project_name", ""),
+            "total_tasks": len(tasks),
+            "by_status": by_status,
+            "by_person": by_person,
+            "by_track": by_track,
+        }
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="assigned.json not found")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
 class BlueprintRequest(BaseModel):
     idea: str
 
