@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 from google import genai
 from google.genai import types
 
+from commit_intel import fetch_live_events
 from search import (
     ASSIGNED_FILE,
     CHROMA_PATH,
@@ -24,9 +25,11 @@ GRAPH_API_URL = "https://orchestra-ai-production.up.railway.app/graph"
 
 SYSTEM_PROMPT = (
     "You are Clover, an AI project assistant. Answer questions about the project "
-    "using only the task context and graph relationship data provided. "
+    "using only the task context, graph relationship data, and recent team activity provided. "
     "Graph data includes nodes (tasks, developers, skills) and edges "
     "(DEPENDS_ON, ASSIGNED_TO, HAS_SKILL) from the project knowledge graph. "
+    "You also have access to recent team activity from Discord and GitHub events — "
+    "use it to answer questions like \"what did X work on recently?\". "
     "Be specific and concise — mention actual names, task IDs, and titles in your answers."
 )
 
@@ -122,6 +125,14 @@ def ask_clover(question: str, task_context: list[dict], api_key: str) -> str:
     context_json = json.dumps(task_context, indent=2, ensure_ascii=False)
 
     prompt_parts = [f"Task context:\n{context_json}"]
+
+    try:
+        live_events = fetch_live_events()
+        if live_events:
+            commit_json = json.dumps(live_events, indent=2, ensure_ascii=False)
+            prompt_parts.append(f"Recent activity context:\n{commit_json}")
+    except Exception:
+        pass
 
     graph_context = get_relevant_graph_context(question)
     if graph_context is not None:
