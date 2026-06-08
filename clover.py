@@ -38,6 +38,7 @@ Use these rules to answer questions:
 Always be specific — mention actual names, task IDs, titles, and timestamps in your answers. If the context does not contain enough information to answer, say so clearly."""
 
 
+# Finds the 3 tasks that best match the user's question using semantic search.
 def search_top_tasks(question: str, api_key: str) -> list[dict]:
     """Find the 3 most relevant tasks using search.py helpers and ChromaDB."""
     tasks = load_assigned_tasks(ASSIGNED_FILE)
@@ -73,6 +74,7 @@ def search_top_tasks(question: str, api_key: str) -> list[dict]:
     return matches
 
 
+# Downloads the project knowledge graph from the Orchestra API.
 def fetch_graph() -> dict | None:
     """Fetch the project graph from the Orchestra API. Returns None on failure."""
     try:
@@ -83,6 +85,7 @@ def fetch_graph() -> dict | None:
         return None
 
 
+# Checks if a graph node is related to the question by name or assignee.
 def is_relevant_node(node: dict, question: str) -> bool:
     """Return True if a graph node matches the question by title or assignee."""
     q = question.lower()
@@ -100,6 +103,7 @@ def is_relevant_node(node: dict, question: str) -> bool:
     return False
 
 
+# Fetches the graph and keeps only the nodes and edges that match the question.
 def get_relevant_graph_context(question: str) -> dict | None:
     """Fetch and filter graph nodes/edges relevant to the question."""
     graph = fetch_graph()
@@ -123,13 +127,16 @@ def get_relevant_graph_context(question: str) -> dict | None:
     return {"nodes": relevant_nodes, "edges": relevant_edges}
 
 
+# Sends all context to Gemini and returns Clover's answer as text.
 def ask_clover(question: str, task_context: list[dict], api_key: str) -> str:
     """Send retrieved tasks and graph context to Gemini and return an answer."""
+    # Set up the Gemini client and start building the prompt with task data.
     client = genai.Client(api_key=api_key)
     context_json = json.dumps(task_context, indent=2, ensure_ascii=False)
 
     prompt_parts = [f"Task context:\n{context_json}"]
 
+    # Try to add recent Discord and GitHub activity to the prompt.
     try:
         live_events = fetch_live_events()
         if live_events:
@@ -138,13 +145,16 @@ def ask_clover(question: str, task_context: list[dict], api_key: str) -> str:
     except Exception:
         pass
 
+    # Add matching graph nodes and edges if the graph API is available.
     graph_context = get_relevant_graph_context(question)
     if graph_context is not None:
         graph_json = json.dumps(graph_context, indent=2, ensure_ascii=False)
         prompt_parts.append(f"Graph context:\n{graph_json}")
 
+    # Add the user's question as the final part of the prompt.
     prompt_parts.append(f"User question: {question}")
 
+    # Send the full prompt to Gemini and get back an answer.
     response = client.models.generate_content(
         model=MODEL_NAME,
         contents="\n\n".join(prompt_parts),
@@ -157,6 +167,7 @@ def ask_clover(question: str, task_context: list[dict], api_key: str) -> str:
     return (response.text or "").strip()
 
 
+# Runs Clover from the command line: asks a question and prints the answer.
 def main() -> None:
     load_dotenv()
     api_key = os.getenv("GEMINI_API_KEY")
