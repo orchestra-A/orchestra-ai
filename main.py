@@ -1,6 +1,7 @@
 """FastAPI server for Orchestra + Clover."""
 
 import os
+from datetime import datetime
 from typing import Any
 
 import chromadb
@@ -45,6 +46,15 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.get("/health")
+def health() -> dict[str, Any]:
+    return {
+        "status": "ok",
+        "endpoints": 12,
+        "timestamp": datetime.utcnow().isoformat(),
+    }
 
 
 class BlueprintRequest(BaseModel):
