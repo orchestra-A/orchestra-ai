@@ -5,6 +5,7 @@ import os
 import sys
 
 import chromadb
+import requests
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
@@ -18,12 +19,15 @@ from search import (
     load_assigned_tasks,
 )
 
-MODEL_NAME = "gemini-2.5-flash"
+MODEL_NAME = "gemini-2.5-flash-lite"
+GRAPH_API_URL = "https://orchestra-ai-production.up.railway.app/graph"
 
 SYSTEM_PROMPT = (
     "You are Clover, an AI project assistant. Answer questions about the project "
-    "using only the task context provided. Be specific and concise — mention actual "
-    "names, task IDs, and titles in your answers."
+    "using only the task context and graph relationship data provided. "
+    "Graph data includes nodes (tasks, developers, skills) and edges "
+    "(DEPENDS_ON, ASSIGNED_TO, HAS_SKILL) from the project knowledge graph. "
+    "Be specific and concise — mention actual names, task IDs, and titles in your answers."
 )
 
 
@@ -62,19 +66,73 @@ def search_top_tasks(question: str, api_key: str) -> list[dict]:
     return matches
 
 
-def ask_clover(question: str, task_context: list[dict], api_key: str) -> str:
-    """Send retrieved tasks to Gemini and return a conversational answer."""
-    # TODO: add Neo4j context here — where graph data will plug in later
+def fetch_graph() -> dict | None:
+    """Fetch the project graph from the Orchestra API. Returns None on failure."""
+    try:
+        response = requests.get(GRAPH_API_URL, timeout=15)
+        response.raise_for_status()
+        return response.json()
+    except Exception:
+        return None
 
+
+def is_relevant_node(node: dict, question: str) -> bool:
+    """Return True if a graph node matches the question by title or assignee."""
+    q = question.lower()
+    data = node.get("data", {})
+    label = str(data.get("label", "")).lower()
+    assigned_to = str(data.get("assigned_to", "")).lower()
+
+    if assigned_to and assigned_to in q:
+        return True
+    if label and label in q:
+        return True
+    for word in q.split():
+        if len(word) > 2 and word in label:
+            return True
+    return False
+
+
+def get_relevant_graph_context(question: str) -> dict | None:
+    """Fetch and filter graph nodes/edges relevant to the question."""
+    graph = fetch_graph()
+    if not graph:
+        return None
+
+    nodes = graph.get("nodes", [])
+    edges = graph.get("edges", [])
+    relevant_nodes = [node for node in nodes if is_relevant_node(node, question)]
+
+    if not relevant_nodes:
+        return {"nodes": [], "edges": []}
+
+    relevant_ids = {node["id"] for node in relevant_nodes}
+    relevant_edges = [
+        edge
+        for edge in edges
+        if edge.get("source") in relevant_ids or edge.get("target") in relevant_ids
+    ]
+
+    return {"nodes": relevant_nodes, "edges": relevant_edges}
+
+
+def ask_clover(question: str, task_context: list[dict], api_key: str) -> str:
+    """Send retrieved tasks and graph context to Gemini and return an answer."""
     client = genai.Client(api_key=api_key)
     context_json = json.dumps(task_context, indent=2, ensure_ascii=False)
 
+    prompt_parts = [f"Task context:\n{context_json}"]
+
+    graph_context = get_relevant_graph_context(question)
+    if graph_context is not None:
+        graph_json = json.dumps(graph_context, indent=2, ensure_ascii=False)
+        prompt_parts.append(f"Graph context:\n{graph_json}")
+
+    prompt_parts.append(f"User question: {question}")
+
     response = client.models.generate_content(
         model=MODEL_NAME,
-        contents=(
-            f"Task context:\n{context_json}\n\n"
-            f"User question: {question}"
-        ),
+        contents="\n\n".join(prompt_parts),
         config=types.GenerateContentConfig(
             system_instruction=SYSTEM_PROMPT,
             temperature=0.3,
