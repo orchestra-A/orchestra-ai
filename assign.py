@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 from google import genai
 from google.genai import types
 
-MODEL_NAME = "gemini-2.5-flash"
+MODEL_NAME = "gemini-2.5-flash-lite"
 BLUEPRINT_FILE = "blueprint.json"
 SKILLS_FILE = "skills.json"
 OUTPUT_FILE = "assigned.json"

@@ -9,6 +9,8 @@ from dotenv import load_dotenv
 from google import genai
 from google.genai import types
 
+from assign import BLUEPRINT_FILE, SKILLS_FILE, assign_tasks, load_json_file
+
 MODEL_NAME = "gemini-2.5-flash-lite"
 GITHUB_API = "https://api.github.com"
 
@@ -40,9 +42,22 @@ Rules:
 """
 
 
+def _github_headers() -> dict | None:
+    """Return GitHub auth headers if GITHUB_TOKEN is set."""
+    github_token = os.getenv("GITHUB_TOKEN")
+    if github_token:
+        return {"Authorization": f"token {github_token}"}
+    return None
+
+
 def fetch_user(username: str) -> dict:
     """Fetch GitHub user profile."""
-    response = requests.get(f"{GITHUB_API}/users/{username}", timeout=30)
+    kwargs: dict = {"timeout": 30}
+    headers = _github_headers()
+    if headers:
+        kwargs["headers"] = headers
+
+    response = requests.get(f"{GITHUB_API}/users/{username}", **kwargs)
     response.raise_for_status()
     return response.json()
 
@@ -51,13 +66,17 @@ def fetch_repos(username: str) -> list[dict]:
     """Fetch all public repositories for a user."""
     repos: list[dict] = []
     page = 1
+    headers = _github_headers()
 
     while True:
-        response = requests.get(
-            f"{GITHUB_API}/users/{username}/repos",
-            params={"per_page": 100, "page": page},
-            timeout=30,
-        )
+        kwargs: dict = {
+            "params": {"per_page": 100, "page": page},
+            "timeout": 30,
+        }
+        if headers:
+            kwargs["headers"] = headers
+
+        response = requests.get(f"{GITHUB_API}/users/{username}/repos", **kwargs)
         response.raise_for_status()
         batch = response.json()
         if not batch:
@@ -70,9 +89,14 @@ def fetch_repos(username: str) -> list[dict]:
 
 def fetch_languages(username: str, repo_name: str) -> dict[str, int]:
     """Fetch language byte counts for one repository."""
+    kwargs: dict = {"timeout": 30}
+    headers = _github_headers()
+    if headers:
+        kwargs["headers"] = headers
+
     response = requests.get(
         f"{GITHUB_API}/repos/{username}/{repo_name}/languages",
-        timeout=30,
+        **kwargs,
     )
     response.raise_for_status()
     return response.json()
@@ -118,8 +142,24 @@ def analyze_profile(
     return json.loads((response.text or "").strip())
 
 
+def save_skills(profile: dict) -> dict:
+    """Load skills.json, add or update this person's entry, and save back."""
+    try:
+        skills = load_json_file(SKILLS_FILE)
+    except FileNotFoundError:
+        skills = {}
+
+    member_name = profile.get("name") or profile.get("github", "")
+    skills[member_name] = profile.get("skills", [])
+
+    with open(SKILLS_FILE, "w", encoding="utf-8") as file:
+        json.dump(skills, file, indent=2, ensure_ascii=False)
+
+    return skills
+
+
 def build_profile(username: str, api_key: str) -> dict:
-    """Fetch GitHub data and generate a developer profile."""
+    """Fetch GitHub data, generate profile, update skills, and re-assign tasks."""
     user = fetch_user(username)
     display_name = user.get("name") or username
     repos = fetch_repos(username)
@@ -131,7 +171,15 @@ def build_profile(username: str, api_key: str) -> dict:
     if not languages:
         raise RuntimeError(f"No language data found for user '{username}'.")
 
-    return analyze_profile(username, display_name, languages, api_key)
+    profile = analyze_profile(username, display_name, languages, api_key)
+    skills = save_skills(profile)
+    blueprint = load_json_file(BLUEPRINT_FILE)
+    assigned = assign_tasks(blueprint, skills, api_key)
+
+    return {
+        "profile": profile,
+        "assignments": assigned.get("tasks", []),
+    }
 
 
 def main() -> None:
@@ -150,8 +198,8 @@ def main() -> None:
     if not username:
         raise RuntimeError("Username cannot be empty.")
 
-    profile = build_profile(username, api_key)
-    print(json.dumps(profile, indent=2, ensure_ascii=False))
+    result = build_profile(username, api_key)
+    print(json.dumps(result, indent=2, ensure_ascii=False))
 
 
 if __name__ == "__main__":
