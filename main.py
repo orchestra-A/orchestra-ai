@@ -4,6 +4,7 @@ import os
 from typing import Any
 
 import chromadb
+import requests
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,6 +16,7 @@ from assign import assign_tasks
 from blueprint import generate_blueprint
 from clover import ask_clover, search_top_tasks
 from graph_query import build_reactflow_graph
+from onboarding import build_profile
 from query import get_all_tasks
 from search import (
     CHROMA_PATH,
@@ -55,6 +57,10 @@ class AssignRequest(BaseModel):
 
 class CloverRequest(BaseModel):
     question: str
+
+
+class OnboardingRequest(BaseModel):
+    github_username: str
 
 
 def get_api_key() -> str:
@@ -225,6 +231,31 @@ def replan() -> dict[str, Any]:
         )
 
     return {"suggestions": suggestions}
+
+
+@app.post("/onboarding")
+def onboarding(body: OnboardingRequest) -> dict[str, Any]:
+    """Generate a developer profile from GitHub and re-assign tasks."""
+    username = body.github_username.strip()
+    if not username:
+        raise HTTPException(status_code=400, detail="github_username cannot be empty.")
+
+    api_key = get_api_key()
+
+    try:
+        return build_profile(username, api_key)
+    except requests.HTTPError as exc:
+        if exc.response is not None and exc.response.status_code == 404:
+            raise HTTPException(
+                status_code=404,
+                detail=f"GitHub user '{username}' not found.",
+            ) from exc
+        raise HTTPException(
+            status_code=502,
+            detail=f"GitHub API error: {exc}",
+        ) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @app.get("/tasks")
