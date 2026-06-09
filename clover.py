@@ -21,7 +21,7 @@ from search import (
 )
 
 MODEL_NAME = "gemini-2.5-flash-lite"
-GRAPH_API_URL = "https://orchestra-ai-production.up.railway.app/graph"
+GRAPH_API_URL = "https://orchestra-ai-36zm.onrender.com/graph"
 
 SYSTEM_PROMPT = """You are Clover, an AI project assistant for a software development team. You have access to three sources of context:
 1. Task context — structured task data with IDs, titles, assignees, tracks, and statuses

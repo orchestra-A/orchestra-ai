@@ -1,8 +1,7 @@
 """Smoke tests for the Orchestra API production endpoints."""
 
 import requests
-
-BASE_URL = "http://localhost:8000"
+BASE_URL = "https://orchestra-ai-36zm.onrender.com"
 TIMEOUT = 120
 
 
