@@ -155,8 +155,55 @@ def test_onboarding() -> None:
         report(endpoint, False, str(exc))
 
 
+def test_health() -> None:
+    endpoint = "GET /health"
+    try:
+        response = requests.get(f"{BASE_URL}/health", timeout=TIMEOUT)
+        data = response.json()
+        passed = (
+            response.ok
+            and "status" in data
+            and "endpoints" in data
+            and "timestamp" in data
+        )
+        report(endpoint, passed, f"status={response.status_code}")
+    except Exception as exc:
+        report(endpoint, False, str(exc))
+
+
+def test_team() -> None:
+    endpoint = "GET /team"
+    try:
+        response = requests.get(f"{BASE_URL}/team", timeout=TIMEOUT)
+        data = response.json()
+        passed = response.ok and "team" in data and isinstance(data["team"], list)
+        report(endpoint, passed, f"status={response.status_code}")
+    except Exception as exc:
+        report(endpoint, False, str(exc))
+
+
+def test_project() -> None:
+    endpoint = "GET /project"
+    try:
+        response = requests.get(f"{BASE_URL}/project", timeout=TIMEOUT)
+        data = response.json()
+        passed = (
+            response.ok
+            and "total_tasks" in data
+            and "by_status" in data
+            and "by_person" in data
+            and "by_track" in data
+        )
+        report(endpoint, passed, f"status={response.status_code}")
+    except Exception as exc:
+        report(endpoint, False, str(exc))
+
+
 def main() -> None:
     print(f"Testing Orchestra API at {BASE_URL}\n")
+    test_health()
+    test_team()
+    test_project()
     blueprint_data = test_blueprint()
     test_assign(blueprint_data)
     test_search()
