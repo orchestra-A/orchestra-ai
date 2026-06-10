@@ -3,11 +3,12 @@
 import json
 import os
 
+import requests
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
 
-MODEL_NAME = "gemini-2.5-flash"
+MODEL_NAME = "gemini-2.5-flash-lite"
 ASSIGNED_FILE = "assigned.json"
 
 PROMPT_TEMPLATE = """You are formatting a daily standup update for an engineering team.
@@ -17,11 +18,14 @@ Project: {project_name}
 Team task status (grouped by person):
 {grouped}
 
+{recent_activity}
+
 Write a clean daily standup update that reads like something you'd paste into a team chat (Slack/Discord).
 
 Rules:
 - One section per person, in a natural standup voice.
 - For each person, cover: completed yesterday, in progress today, and blockers (if any).
+- If recent team activity is provided, use it to add what people actually did recently to each person's standup entry.
 - Mention task IDs and titles where relevant.
 - Skip empty categories for a person (e.g. no "blocked" line if they have none).
 - Keep it concise, friendly, and scannable.
@@ -67,15 +71,41 @@ def group_tasks_by_person(tasks: list[dict]) -> dict[str, dict[str, list[dict]]]
     return grouped
 
 
+def fetch_live_events() -> list:
+    """Fetch live Discord and GitHub events from the Orchestra backend."""
+    try:
+        response = requests.get(
+            "https://orchestra-backend-2v5a.onrender.com/events",
+            timeout=30,
+        )
+        response.raise_for_status()
+        data = response.json()
+        if data.get("total", 0) == 0:
+            return []
+        return data.get("events", [])
+    except Exception:
+        return []
+
+
 def generate_standup(grouped: dict, project_name: str, api_key: str) -> str:
     """Send grouped task data to Gemini and return formatted standup."""
     client = genai.Client(api_key=api_key)
+
+    grouped_json = json.dumps(grouped, indent=2, ensure_ascii=False)
+    events = fetch_live_events()
+    recent_activity = ""
+    if events:
+        events_json = json.dumps(events, indent=2, ensure_ascii=False)
+        recent_activity = (
+            f"Recent team activity (from Discord/GitHub):\n{events_json}"
+        )
 
     response = client.models.generate_content(
         model=MODEL_NAME,
         contents=PROMPT_TEMPLATE.format(
             project_name=project_name,
-            grouped=json.dumps(grouped, indent=2, ensure_ascii=False),
+            grouped=grouped_json,
+            recent_activity=recent_activity,
         ),
         config=types.GenerateContentConfig(temperature=0.4),
     )
