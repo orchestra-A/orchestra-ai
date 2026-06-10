@@ -128,13 +128,24 @@ def get_relevant_graph_context(question: str) -> dict | None:
 
 
 # Sends all context to Gemini and returns Clover's answer as text.
-def ask_clover(question: str, task_context: list[dict], api_key: str) -> str:
+def ask_clover(
+    question: str,
+    task_context: list[dict],
+    api_key: str,
+    conversation_history: list[dict] = None,
+) -> str:
     """Send retrieved tasks and graph context to Gemini and return an answer."""
     # Set up the Gemini client and start building the prompt with task data.
     client = genai.Client(api_key=api_key)
     context_json = json.dumps(task_context, indent=2, ensure_ascii=False)
 
     prompt_parts = [f"Task context:\n{context_json}"]
+
+    if conversation_history:
+        history_text = "Conversation history:\n"
+        for item in conversation_history[-5:]:
+            history_text += f"User: {item['question']}\nClover: {item['answer']}\n"
+        prompt_parts.append(history_text)
 
     # Try to add recent Discord and GitHub activity to the prompt.
     try:
@@ -184,12 +195,16 @@ def main() -> None:
     if not question:
         raise RuntimeError("Question cannot be empty.")
 
+    conversation_history: list[dict] = []
     relevant_tasks = search_top_tasks(question, api_key)
-    answer = ask_clover(question, relevant_tasks, api_key)
+    answer = ask_clover(question, relevant_tasks, api_key, conversation_history)
 
     print(f"\nQuestion: {question}\n")
     print("Clover:")
     print(answer)
+
+    conversation_history.append({"question": question, "answer": answer})
+    conversation_history = conversation_history[-5:]
 
 
 if __name__ == "__main__":
