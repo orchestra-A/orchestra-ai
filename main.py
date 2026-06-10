@@ -119,6 +119,7 @@ class AssignRequest(BaseModel):
 
 class CloverRequest(BaseModel):
     question: str
+    conversation_history: list[dict] = []
 
 
 class OnboardingRequest(BaseModel):
@@ -238,7 +239,9 @@ def clover(body: CloverRequest) -> dict[str, str]:
 
     try:
         relevant_tasks = search_top_tasks(body.question.strip(), api_key)
-        answer = ask_clover(body.question.strip(), relevant_tasks, api_key)
+        answer = ask_clover(
+            body.question.strip(), relevant_tasks, api_key, body.conversation_history
+        )
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
