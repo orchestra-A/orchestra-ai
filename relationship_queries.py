@@ -6,16 +6,21 @@ ReactFlow /graph blob. Each function *returns* plain JSON-serialisable dicts (it
 does not print), so the caller can json.dumps them straight into a Gemini prompt
 or a FastAPI response.
 
-Three questions, three functions:
+Questions -> functions:
     "What tasks is <person> working on?"      -> tasks_for_person(name)
     "What tasks are blocked?"                  -> blocked_tasks()
     "What are the dependencies of task T1?"    -> dependencies_of("T1")
+    "What depends on T5 / what breaks if..?"   -> dependents_of("T5")
+    "What skills does <person> have?"          -> skills_of(name)
+    "Who can do <skill>?"                      -> who_has_skill(skill)
 
-Task dicts match CONTRACTS.md §3 field names (id, title, track, description,
-status, assigned_to, dependencies) so they line up with query.get_all_tasks().
+Task-returning functions hand back dicts matching CONTRACTS.md §3 field names
+(id, title, track, description, status, assigned_to, dependencies) so they line
+up with query.get_all_tasks(); skill functions return plain name lists.
 Graph schema (see ingest.py):
     (Developer)-[:ASSIGNED_TO]->(Task)
     (Task)-[:DEPENDS_ON]->(Task)
+    (Developer)-[:HAS_SKILL]->(Skill)
     status in: todo | in_progress | completed | blocked
 """
 
@@ -52,6 +57,14 @@ def _run(cypher: str, **params) -> list[dict]:
             task["dependencies"] = sorted(task["dependencies"], key=_task_sort_key)
     rows.sort(key=lambda t: _task_sort_key(t.get("id", "")))
     return rows
+
+
+def _names(cypher: str, **params) -> list[str]:
+    """Run a read query returning one column and give back a sorted name list."""
+    driver = get_driver()
+    with driver.session(database=_database()) as session:
+        values = [record.value() for record in session.run(cypher, **params)]
+    return sorted({v for v in values if v})
 
 
 def tasks_for_person(name: str) -> list[dict]:
@@ -94,6 +107,49 @@ def dependencies_of(task_id: str, recursive: bool = False) -> list[dict]:
     return _run(cypher, task_id=task_id)
 
 
+def dependents_of(task_id: str, recursive: bool = False) -> list[dict]:
+    """Tasks that depend ON <task_id> — its blast radius / impact.
+
+    The reverse of dependencies_of: answers "if T5 slips/blocks, what is
+    affected?" — exactly what re_planner.py needs for impact analysis.
+    recursive=False -> direct dependents only (one hop).
+    recursive=True  -> every downstream task that (transitively) needs it.
+    Returns [] if nothing depends on it or the task does not exist.
+    """
+    hop = "*1.." if recursive else ""
+    cypher = f"""
+        MATCH (t:Task)-[:DEPENDS_ON{hop}]->(target:Task {{id: $task_id}})
+        {_TASK_PROJECTION}
+    """
+    return _run(cypher, task_id=task_id)
+
+
+def skills_of(name: str) -> list[str]:
+    """Skill names a developer has. Answers "What skills does <person> have?".
+
+    Case-insensitive on the developer name. Returns [] if unknown/no skills.
+    """
+    cypher = """
+        MATCH (d:Developer)-[:HAS_SKILL]->(s:Skill)
+        WHERE toLower(d.name) = toLower($name)
+        RETURN s.name AS skill
+    """
+    return _names(cypher, name=name)
+
+
+def who_has_skill(skill: str) -> list[str]:
+    """Developers who have a skill. Answers "Who can do <skill>?".
+
+    Case-insensitive on the skill name. Returns [] if nobody has it.
+    """
+    cypher = """
+        MATCH (d:Developer)-[:HAS_SKILL]->(s:Skill)
+        WHERE toLower(s.name) = toLower($skill)
+        RETURN d.name AS developer
+    """
+    return _names(cypher, skill=skill)
+
+
 def main() -> None:
     """Quick manual check: python relationship_queries.py [person] [task_id]."""
     load_dotenv()
@@ -108,6 +164,12 @@ def main() -> None:
 
     print(f"\n# Direct dependencies of {task_id}:")
     print(json.dumps(dependencies_of(task_id), indent=2, ensure_ascii=False))
+
+    print(f"\n# Tasks that depend on {task_id} (impact):")
+    print(json.dumps([t["id"] for t in dependents_of(task_id)], ensure_ascii=False))
+
+    print(f"\n# Skills {person} has:")
+    print(json.dumps(skills_of(person), ensure_ascii=False))
 
 
 if __name__ == "__main__":
