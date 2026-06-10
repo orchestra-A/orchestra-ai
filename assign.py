@@ -81,14 +81,31 @@ def assign_tasks(blueprint: dict, skills: dict, api_key: str) -> dict:
             skills=json.dumps(skills, ensure_ascii=False),
         ),
         config=types.GenerateContentConfig(
-            temperature=0.2,
+            temperature=0,
             response_mime_type="application/json",
         ),
     )
 
     raw = response.text or ""
     payload = extract_json(raw)
-    return json.loads(payload)
+    result = json.loads(payload)
+
+    try:
+        existing = load_json_file(OUTPUT_FILE)
+        existing_assignments = {
+            str(task["id"]): task["assigned_to"]
+            for task in existing.get("tasks", [])
+            if task.get("id") and task.get("assigned_to")
+        }
+    except FileNotFoundError:
+        existing_assignments = {}
+
+    for task in result.get("tasks", []):
+        task_id = str(task.get("id", ""))
+        if task_id in existing_assignments:
+            task["assigned_to"] = existing_assignments[task_id]
+
+    return result
 
 
 def main() -> None:
