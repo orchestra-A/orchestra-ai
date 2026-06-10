@@ -3,11 +3,12 @@
 import json
 import os
 
+import requests
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
 
-MODEL_NAME = "gemini-2.5-flash"
+MODEL_NAME = "gemini-2.5-flash-lite"
 ASSIGNED_FILE = "assigned.json"
 
 PROMPT_TEMPLATE = """You are an engineering delivery lead helping re-plan work around blockers.
@@ -23,6 +24,12 @@ Tasks impacted because they depend on this blocked task:
 Team tasks snapshot:
 {all_tasks}
 
+Team workload (tasks per person):
+{workload}
+
+Team skills:
+{skills}
+
 Suggest a practical re-plan for this blocker. Return ONLY a valid JSON object with this shape:
 {{
   "blocked_task_id": "T1",
@@ -34,6 +41,7 @@ Suggest a practical re-plan for this blocker. Return ONLY a valid JSON object wi
 
 Rules:
 - Keep suggestions realistic based on assignees, tracks, and dependencies.
+- Use workload and skills to suggest the most suitable person to reassign to — prefer people with lower workload and matching skills.
 - Mention specific people/task IDs where useful.
 - Keep each field concise and actionable.
 - Output JSON only, no markdown or extra text.
@@ -61,11 +69,35 @@ def find_dependents(blocked_task_id: str, tasks: list[dict]) -> list[dict]:
     return dependents
 
 
+def fetch_project_workload() -> dict:
+    """Fetch task counts per person from the Orchestra project API."""
+    try:
+        response = requests.get(
+            "https://orchestra-ai-36zm.onrender.com/project",
+            timeout=30,
+        )
+        response.raise_for_status()
+        return response.json().get("by_person", {})
+    except Exception:
+        return {}
+
+
+def load_skills() -> dict:
+    """Load team skill profiles from skills.json."""
+    try:
+        with open("skills.json", "r", encoding="utf-8") as file:
+            return json.load(file)
+    except FileNotFoundError:
+        return {}
+
+
 def suggest_replan(
     blocked_task: dict, dependents: list[dict], all_tasks: list[dict], project_name: str, api_key: str
 ) -> dict:
     """Call Gemini for one blocked task re-plan suggestion."""
     client = genai.Client(api_key=api_key)
+    workload = fetch_project_workload()
+    skills = load_skills()
     response = client.models.generate_content(
         model=MODEL_NAME,
         contents=PROMPT_TEMPLATE.format(
@@ -73,6 +105,8 @@ def suggest_replan(
             blocked_task=json.dumps(blocked_task, ensure_ascii=False, indent=2),
             dependents=json.dumps(dependents, ensure_ascii=False, indent=2),
             all_tasks=json.dumps(all_tasks, ensure_ascii=False),
+            workload=json.dumps(workload, ensure_ascii=False, indent=2),
+            skills=json.dumps(skills, ensure_ascii=False, indent=2),
         ),
         config=types.GenerateContentConfig(
             temperature=0.3,
