@@ -148,7 +148,7 @@ def get_api_key() -> str:
     return api_key
 
 
-def run_search(question: str, api_key: str) -> list[dict[str, Any]]:
+def run_search(question: str, api_key: str, n_results: int = 3) -> list[dict[str, Any]]:
     """Index assigned tasks and return top 3 matches for a question."""
     tasks = load_assigned_tasks(ASSIGNED_FILE)
     if not tasks:
@@ -168,7 +168,7 @@ def run_search(question: str, api_key: str) -> list[dict[str, Any]]:
     query_embedding = get_embedding(embed_client, question)
     results = collection.query(
         query_embeddings=[query_embedding],
-        n_results=3,
+        n_results=n_results,
         include=["metadatas", "distances"],
     )
 
@@ -231,6 +231,7 @@ def assign(body: AssignRequest) -> dict[str, Any]:
 @app.get("/search")
 def search(
     question: str = Query(..., description="Natural language search question"),
+    n_results: int = Query(3, description="Number of results to return"),
 ) -> dict[str, Any]:
     """Return the top 3 tasks matching a search question."""
     if not question.strip():
@@ -239,7 +240,7 @@ def search(
     api_key = get_api_key()
 
     try:
-        matches = run_search(question.strip(), api_key)
+        matches = run_search(question.strip(), api_key, n_results)
     except ValueError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
