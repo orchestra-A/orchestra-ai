@@ -83,7 +83,7 @@ def generate_blueprint(idea: str) -> dict:
         model=MODEL_NAME,
         contents=PROMPT_TEMPLATE.format(idea=idea),
         config=types.GenerateContentConfig(
-            temperature=0.4,
+            temperature=0.0,
             response_mime_type="application/json",
         ),
     )
