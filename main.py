@@ -197,6 +197,11 @@ def create_blueprint(body: BlueprintRequest) -> dict[str, Any]:
     """Generate a task roadmap from a raw app idea."""
     if not body.idea.strip():
         raise HTTPException(status_code=400, detail="idea cannot be empty.")
+    if len(body.idea.strip()) > 2000:
+        raise HTTPException(
+            status_code=400,
+            detail="App idea is too long. Maximum 2000 characters allowed.",
+        )
 
     try:
         return generate_blueprint(body.idea.strip())
