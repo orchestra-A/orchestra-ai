@@ -54,7 +54,7 @@ python main.py
 
 Interactive docs: http://localhost:8000/docs
 
-Deployed API: https://orchestra-ai-production.up.railway.app
+Deployed API: https://orchestra-ai-36zm.onrender.com
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
