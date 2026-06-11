@@ -1,3 +1,4 @@
+# Neo4j stores the knowledge graph — tasks, developers, skills, dependencies, and all relationships between them
 """Graph read layer that returns the task graph as ReactFlow-ready data.
 
 Where query.py prints to the terminal, this module *returns* plain dicts so the
