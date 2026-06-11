@@ -127,6 +127,56 @@ def get_relevant_graph_context(question: str) -> dict | None:
     return {"nodes": relevant_nodes, "edges": relevant_edges}
 
 
+# Builds relationship details for matched tasks using the full project graph.
+def enrich_with_graph(task_ids: list[str], graph: dict) -> list[dict]:
+    """Enrich task IDs with dependencies, assignees, and dependents from the graph."""
+    nodes = graph.get("nodes", [])
+    edges = graph.get("edges", [])
+    nodes_by_id = {node["id"]: node for node in nodes}
+
+    enriched: list[dict] = []
+    for task_id in task_ids:
+        task_node = nodes_by_id.get(task_id)
+        if not task_node:
+            continue
+
+        dependencies: list[dict] = []
+        dependents: list[dict] = []
+        assigned_to = None
+
+        for edge in edges:
+            if edge.get("source") != task_id and edge.get("target") != task_id:
+                continue
+
+            relationship = edge.get("data", {}).get("relationship", "")
+            source = edge.get("source")
+            target = edge.get("target")
+
+            if source == task_id and relationship == "DEPENDS_ON":
+                dep_node = nodes_by_id.get(target)
+                if dep_node:
+                    dependencies.append(dep_node)
+            elif target == task_id and relationship == "DEPENDS_ON":
+                dependent_node = nodes_by_id.get(source)
+                if dependent_node:
+                    dependents.append(dependent_node)
+            elif target == task_id and relationship == "ASSIGNED_TO":
+                developer_node = nodes_by_id.get(source)
+                if developer_node:
+                    assigned_to = developer_node
+
+        enriched.append(
+            {
+                "task": task_node,
+                "dependencies": dependencies,
+                "assigned_to": assigned_to,
+                "dependents": dependents,
+            }
+        )
+
+    return enriched
+
+
 # Sends all context to Gemini and returns Clover's answer as text.
 def ask_clover(
     question: str,
@@ -161,6 +211,17 @@ def ask_clover(
     if graph_context is not None:
         graph_json = json.dumps(graph_context, indent=2, ensure_ascii=False)
         prompt_parts.append(f"Graph context:\n{graph_json}")
+
+    task_ids = [t.get("id") for t in task_context if t.get("id")]
+    full_graph = fetch_graph()
+    if full_graph:
+        enriched = enrich_with_graph(task_ids, full_graph)
+        if enriched:
+            enriched_json = json.dumps(enriched, indent=2, ensure_ascii=False)
+            prompt_parts.append(
+                "Enriched graph context (relationships for matched tasks):\n"
+                f"{enriched_json}"
+            )
 
     # Add the user's question as the final part of the prompt.
     prompt_parts.append(f"User question: {question}")
