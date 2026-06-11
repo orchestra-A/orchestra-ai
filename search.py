@@ -1,3 +1,4 @@
+# ChromaDB stores vector embeddings for semantic search — used by Clover to find relevant context from past events and tasks
 """Semantic task search over assigned roadmap tasks using ChromaDB."""
 
 import json
