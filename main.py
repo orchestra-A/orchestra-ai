@@ -9,7 +9,7 @@ from typing import Any
 import chromadb
 import requests
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from neo4j import GraphDatabase
 from fastapi.middleware.cors import CORSMiddleware
 from google import genai
@@ -37,6 +37,13 @@ from re_planner import (
     suggest_replan,
 )
 from standup import generate_standup, group_tasks_by_person, load_assigned
+
+
+def verify_api_key(x_api_key: str = Header(default=None)) -> None:
+    api_key = os.getenv("INTERNAL_API_KEY")
+    if api_key and x_api_key != api_key:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
 
 load_dotenv()
 
@@ -185,7 +192,7 @@ def run_search(question: str, api_key: str) -> list[dict[str, Any]]:
     return matches
 
 
-@app.post("/blueprint")
+@app.post("/blueprint", dependencies=[Depends(verify_api_key)])
 def create_blueprint(body: BlueprintRequest) -> dict[str, Any]:
     """Generate a task roadmap from a raw app idea."""
     if not body.idea.strip():
@@ -199,7 +206,7 @@ def create_blueprint(body: BlueprintRequest) -> dict[str, Any]:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
-@app.post("/assign")
+@app.post("/assign", dependencies=[Depends(verify_api_key)])
 def assign(body: AssignRequest) -> dict[str, Any]:
     """Assign tasks to team members based on skills."""
     if not body.tasks:
@@ -234,7 +241,7 @@ def search(
     return {"question": question.strip(), "matches": matches}
 
 
-@app.post("/clover")
+@app.post("/clover", dependencies=[Depends(verify_api_key)])
 def clover(body: CloverRequest) -> dict[str, str]:
     """Answer a project question using RAG task context and Clover."""
     if not body.question.strip():
@@ -325,7 +332,7 @@ def commit_intel() -> dict[str, Any]:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
-@app.post("/onboarding")
+@app.post("/onboarding", dependencies=[Depends(verify_api_key)])
 def onboarding(body: OnboardingRequest) -> dict[str, Any]:
     """Generate a developer profile from GitHub and re-assign tasks."""
     username = body.github_username.strip()
@@ -425,7 +432,7 @@ def update_task_status(task_id: str, body: TaskStatusRequest) -> dict[str, Any]:
         ) from exc
 
 
-@app.get("/graph")
+@app.get("/graph", dependencies=[Depends(verify_api_key)])
 def graph(
     developers: bool = Query(
         True, description="Include Developer nodes and ASSIGNED_TO edges"
