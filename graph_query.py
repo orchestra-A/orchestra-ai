@@ -27,13 +27,6 @@ from neo4j import Driver, GraphDatabase
 
 load_dotenv()
 
-# Horizontal/vertical spacing for the starter layout (pixels). ReactFlow needs
-# a position on every node; we lay tasks out left-to-right by dependency depth
-# and put developers / skills in their own columns. Prince can re-run a client
-# side layout (dagre/elk) on top of this — the positions are just a sane start.
-X_GAP = 280
-Y_GAP = 130
-
 _driver: Optional[Driver] = None
 
 
@@ -59,44 +52,10 @@ def _database() -> Optional[str]:
     return os.getenv("NEO4J_DATABASE") or None
 
 
-def _task_levels(task_ids: list[str], dep_edges: list[dict]) -> dict[str, int]:
-    """Assign each task a depth = longest dependency chain beneath it.
-
-    A task with no dependencies is level 0; otherwise its level is
-    1 + the deepest dependency. Cycles are guarded against so a malformed
-    graph degrades to level 0 instead of recursing forever.
-    """
-    deps: dict[str, list[str]] = {tid: [] for tid in task_ids}
-    for edge in dep_edges:
-        if edge["source"] in deps:
-            deps[edge["source"]].append(edge["target"])
-
-    level: dict[str, int] = {}
-    visiting: set[str] = set()
-
-    def depth(tid: str) -> int:
-        if tid in level:
-            return level[tid]
-        if tid in visiting:  # cycle guard
-            return 0
-        visiting.add(tid)
-        deepest = 0
-        for dep in deps.get(tid, []):
-            deepest = max(deepest, depth(dep) + 1)
-        visiting.discard(tid)
-        level[tid] = deepest
-        return deepest
-
-    for tid in task_ids:
-        depth(tid)
-    return level
-
-
-def _task_node(task: dict, x: float, y: float) -> dict[str, Any]:
+def _task_node(task: dict) -> dict[str, Any]:
     return {
         "id": task["id"],
         "type": "task",
-        "position": {"x": float(x), "y": float(y)},
         "data": {
             "label": task["title"],
             "track": task.get("track"),
@@ -108,20 +67,18 @@ def _task_node(task: dict, x: float, y: float) -> dict[str, Any]:
     }
 
 
-def _developer_node(name: str, x: float, y: float) -> dict[str, Any]:
+def _developer_node(name: str) -> dict[str, Any]:
     return {
         "id": f"dev:{name}",
         "type": "developer",
-        "position": {"x": float(x), "y": float(y)},
         "data": {"label": name},
     }
 
 
-def _skill_node(name: str, x: float, y: float) -> dict[str, Any]:
+def _skill_node(name: str) -> dict[str, Any]:
     return {
         "id": f"skill:{name}",
         "type": "skill",
-        "position": {"x": float(x), "y": float(y)},
         "data": {"label": name},
     }
 
@@ -199,22 +156,13 @@ def build_reactflow_graph(
         )
 
     # ---- nodes ----------------------------------------------------------
-    levels = _task_levels([t["id"] for t in tasks], dep_edges)
-    by_level: dict[int, list[dict]] = {}
-    for task in tasks:
-        by_level.setdefault(levels[task["id"]], []).append(task)
-
     nodes: list[dict[str, Any]] = []
-    for level, group in sorted(by_level.items()):
-        for row, task in enumerate(group):
-            nodes.append(_task_node(task, x=level * X_GAP, y=row * Y_GAP))
-
-    max_level = max(levels.values(), default=0)
-    for row, name in enumerate(developers):  # developers in a left-hand column
-        nodes.append(_developer_node(name, x=-1.6 * X_GAP, y=row * Y_GAP))
-    skill_x = (max_level + 2) * X_GAP
-    for row, name in enumerate(skills):  # skills in a right-hand column
-        nodes.append(_skill_node(name, x=skill_x, y=row * Y_GAP))
+    for task in tasks:
+        nodes.append(_task_node(task))
+    for name in developers:
+        nodes.append(_developer_node(name))
+    for name in skills:
+        nodes.append(_skill_node(name))
 
     # ---- edges ----------------------------------------------------------
     edges: list[dict[str, Any]] = [
