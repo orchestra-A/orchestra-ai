@@ -247,7 +247,7 @@ def search(
 
 
 @app.post("/clover", dependencies=[Depends(verify_api_key)])
-def clover(body: CloverRequest) -> dict[str, str]:
+def clover(body: CloverRequest) -> dict[str, Any]:
     """Answer a project question using RAG task context and Clover."""
     if not body.question.strip():
         raise HTTPException(status_code=400, detail="question cannot be empty.")
@@ -262,7 +262,10 @@ def clover(body: CloverRequest) -> dict[str, str]:
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    return {"answer": answer}
+    updated_history = body.conversation_history + [
+        {"question": body.question.strip(), "answer": answer}
+    ]
+    return {"answer": answer, "conversation_history": updated_history[-5:]}
 
 
 @app.get("/standup")
