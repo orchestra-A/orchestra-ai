@@ -1,14 +1,14 @@
 """Generate a structured project blueprint from a raw app idea using Gemini."""
 
-import json # for parsing the JSON response
-import os # for reading environment variables
-import re # for regular expressions
-import sys # for command line arguments
-from datetime import datetime, timezone # for ISO timestamps
+import json
+import os
+import re
+import sys
+from datetime import datetime, timezone
 
-from dotenv import load_dotenv # for loading .env files
-from google import genai # for generating the blueprint
-from google.genai import types # for typed generation config
+from dotenv import load_dotenv
+from google import genai
+from google.genai import types
 
 load_dotenv()
 
