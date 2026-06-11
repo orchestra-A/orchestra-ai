@@ -7,6 +7,7 @@ import sys
 import requests
 from dotenv import load_dotenv
 from google import genai
+from neo4j import GraphDatabase
 from google.genai import types
 
 from assign import BLUEPRINT_FILE, SKILLS_FILE, assign_tasks, load_json_file
@@ -158,6 +159,53 @@ def save_skills(profile: dict) -> dict:
     return skills
 
 
+def save_to_neo4j(profile: dict) -> None:
+    """Create or update a developer node and their skills in Neo4j."""
+    try:
+        uri = os.getenv("NEO4J_URI")
+        username = os.getenv("NEO4J_USERNAME")
+        password = os.getenv("NEO4J_PASSWORD")
+        database = os.getenv("NEO4J_DATABASE") or None
+
+        if not all([uri, username, password]):
+            print("Warning: Neo4j environment variables are not set. Skipping Neo4j save.")
+            return
+
+        name = profile.get("name") or profile.get("github", "")
+        github = profile.get("github", "")
+        role = profile.get("role", "")
+        skills = profile.get("skills", [])
+
+        driver = GraphDatabase.driver(uri, auth=(username, password))
+        try:
+            with driver.session(database=database) as session:
+                session.run(
+                    """
+                    MERGE (d:Developer {name: $name})
+                    SET d.github = $github, d.role = $role
+                    """,
+                    name=name,
+                    github=github,
+                    role=role,
+                )
+                for skill in skills:
+                    session.run(
+                        """
+                        MERGE (s:Skill {name: $skill})
+                        MERGE (d:Developer {name: $name})
+                        MERGE (d)-[:HAS_SKILL]->(s)
+                        """,
+                        skill=skill,
+                        name=name,
+                    )
+        finally:
+            driver.close()
+
+        print(f"Developer {name} saved to Neo4j")
+    except Exception as exc:
+        print(exc)
+
+
 def build_profile(username: str, api_key: str) -> dict:
     """Fetch GitHub data, generate profile, update skills, and re-assign tasks."""
     user = fetch_user(username)
@@ -173,6 +221,7 @@ def build_profile(username: str, api_key: str) -> dict:
 
     profile = analyze_profile(username, display_name, languages, api_key)
     skills = save_skills(profile)
+    save_to_neo4j(profile)
     blueprint = load_json_file(BLUEPRINT_FILE)
     assigned = assign_tasks(blueprint, skills, api_key)
 
