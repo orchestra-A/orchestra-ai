@@ -10,6 +10,7 @@ import chromadb
 import requests
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query
+from neo4j import GraphDatabase
 from fastapi.middleware.cors import CORSMiddleware
 from google import genai
 from pydantic import BaseModel
@@ -124,6 +125,10 @@ class CloverRequest(BaseModel):
 
 class OnboardingRequest(BaseModel):
     github_username: str
+
+
+class TaskStatusRequest(BaseModel):
+    status: str
 
 
 def get_api_key() -> str:
@@ -363,6 +368,58 @@ def get_tasks() -> list[dict[str, Any]]:
     except RuntimeError as exc:  # missing NEO4J_* env vars
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     except Exception as exc:  # Neo4j unavailable / query failure
+        raise HTTPException(
+            status_code=503, detail=f"Graph database error: {exc}"
+        ) from exc
+
+
+@app.patch("/tasks/{task_id}/status")
+def update_task_status(task_id: str, body: TaskStatusRequest) -> dict[str, Any]:
+    """Update a task's status in the Neo4j graph."""
+    allowed_statuses = {"completed", "in_progress", "blocked"}
+    if body.status not in allowed_statuses:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid status. Must be one of: {', '.join(sorted(allowed_statuses))}",
+        )
+
+    try:
+        uri = os.getenv("NEO4J_URI")
+        username = os.getenv("NEO4J_USERNAME")
+        password = os.getenv("NEO4J_PASSWORD")
+        database = os.getenv("NEO4J_DATABASE") or None
+
+        if not all([uri, username, password]):
+            raise RuntimeError(
+                "NEO4J_URI, NEO4J_USERNAME and NEO4J_PASSWORD must be set. "
+                "Add them to a .env file in the project root."
+            )
+
+        driver = GraphDatabase.driver(uri, auth=(username, password))
+        try:
+            driver.verify_connectivity()
+            with driver.session(database=database) as session:
+                record = session.run(
+                    """
+                    MATCH (t:Task {id: $task_id})
+                    SET t.status = $status
+                    RETURN t.id AS id, t.status AS status
+                    """,
+                    task_id=task_id,
+                    status=body.status,
+                ).single()
+        finally:
+            driver.close()
+
+        if record is None:
+            raise HTTPException(status_code=404, detail=f"Task '{task_id}' not found.")
+
+        return {"id": record["id"], "status": record["status"]}
+    except HTTPException:
+        raise
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except Exception as exc:
         raise HTTPException(
             status_code=503, detail=f"Graph database error: {exc}"
         ) from exc
