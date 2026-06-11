@@ -19,7 +19,8 @@ chroma_db/
 .vscode/
 .idea/
 
-CLAUDE.mdassigned.json
+CLAUDE.md
+assigned.json
 blueprint.json
 skill_gap_report.json
 orchestra-backend/
