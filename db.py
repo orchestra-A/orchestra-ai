@@ -1,3 +1,4 @@
+# PostgreSQL stores user accounts, OAuth session data, and workspace settings
 """Database connection helper."""
 
 import os
