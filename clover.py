@@ -47,13 +47,7 @@ def search_top_tasks(question: str, api_key: str) -> list[dict]:
 
     embed_client = genai.Client(api_key=api_key)
     chroma_client = chromadb.PersistentClient(path=CHROMA_PATH)
-
-    try:
-        chroma_client.delete_collection(name=COLLECTION_NAME)
-    except Exception:
-        pass
-
-    collection = chroma_client.create_collection(name=COLLECTION_NAME)
+    collection = chroma_client.get_or_create_collection(name=COLLECTION_NAME)
     index_tasks(collection, embed_client, tasks)
 
     query_embedding = get_embedding(embed_client, question)
@@ -104,9 +98,8 @@ def is_relevant_node(node: dict, question: str) -> bool:
 
 
 # Fetches the graph and keeps only the nodes and edges that match the question.
-def get_relevant_graph_context(question: str) -> dict | None:
+def get_relevant_graph_context(question: str, graph: dict | None) -> dict | None:
     """Fetch and filter graph nodes/edges relevant to the question."""
-    graph = fetch_graph()
     if not graph:
         return None
 
@@ -185,6 +178,7 @@ def ask_clover(
     conversation_history: list[dict] = None,
 ) -> str:
     """Send retrieved tasks and graph context to Gemini and return an answer."""
+    full_graph = fetch_graph()
     # Set up the Gemini client and start building the prompt with task data.
     client = genai.Client(api_key=api_key)
     context_json = json.dumps(task_context, indent=2, ensure_ascii=False)
@@ -207,13 +201,12 @@ def ask_clover(
         pass
 
     # Add matching graph nodes and edges if the graph API is available.
-    graph_context = get_relevant_graph_context(question)
+    graph_context = get_relevant_graph_context(question, full_graph)
     if graph_context is not None:
         graph_json = json.dumps(graph_context, indent=2, ensure_ascii=False)
         prompt_parts.append(f"Graph context:\n{graph_json}")
 
     task_ids = [t.get("id") for t in task_context if t.get("id")]
-    full_graph = fetch_graph()
     if full_graph:
         enriched = enrich_with_graph(task_ids, full_graph)
         if enriched:
