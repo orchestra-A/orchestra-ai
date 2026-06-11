@@ -22,3 +22,7 @@ chroma_db/
 CLAUDE.mdassigned.json
 blueprint.json
 skill_gap_report.json
+orchestra-backend/
+cursor.py
+basic-visual-orchestra.pdf
+project-idea/
