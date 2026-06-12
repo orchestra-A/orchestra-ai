@@ -8,6 +8,8 @@ from dotenv import load_dotenv
 from google import genai
 from google.genai import types
 
+from assign import fetch_skills_from_neo4j
+
 MODEL_NAME = "gemini-2.5-flash-lite"
 ASSIGNED_FILE = "assigned.json"
 
@@ -82,22 +84,13 @@ def fetch_project_workload() -> dict:
         return {}
 
 
-def load_skills() -> dict:
-    """Load team skill profiles from skills.json."""
-    try:
-        with open("skills.json", "r", encoding="utf-8") as file:
-            return json.load(file)
-    except FileNotFoundError:
-        return {}
-
-
 def suggest_replan(
     blocked_task: dict, dependents: list[dict], all_tasks: list[dict], project_name: str, api_key: str
 ) -> dict:
     """Call Gemini for one blocked task re-plan suggestion."""
     client = genai.Client(api_key=api_key)
     workload = fetch_project_workload()
-    skills = load_skills()
+    skills = fetch_skills_from_neo4j()
     response = client.models.generate_content(
         model=MODEL_NAME,
         contents=PROMPT_TEMPLATE.format(
