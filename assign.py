@@ -3,15 +3,14 @@
 import json
 import os
 import re
+import sys
 
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
+from neo4j import GraphDatabase
 
 MODEL_NAME = "gemini-2.5-flash-lite"
-BLUEPRINT_FILE = "blueprint.json"
-SKILLS_FILE = "skills.json"
-OUTPUT_FILE = "assigned.json"
 
 PROMPT_TEMPLATE = """You are an engineering manager assigning work to team members.
 
@@ -64,10 +63,29 @@ def extract_json(text: str) -> str:
     return cleaned[start : end + 1]
 
 
-def load_json_file(path: str) -> dict:
-    """Load and parse a JSON file."""
-    with open(path, "r", encoding="utf-8") as file:
-        return json.load(file)
+def fetch_skills_from_neo4j() -> dict[str, list[str]]:
+    """Fetch developer skills from Neo4j. Returns empty dict on failure."""
+    try:
+        uri = os.getenv("NEO4J_URI")
+        username = os.getenv("NEO4J_USERNAME")
+        password = os.getenv("NEO4J_PASSWORD")
+        database = os.getenv("NEO4J_DATABASE") or None
+        if not all([uri, username, password]):
+            return {}
+
+        driver = GraphDatabase.driver(uri, auth=(username, password))
+        with driver.session(database=database) as session:
+            rows = session.run(
+                """
+                MATCH (d:Developer)-[:HAS_SKILL]->(s:Skill)
+                RETURN d.name AS developer, collect(s.name) AS skills
+                """
+            )
+            result = {row["developer"]: row["skills"] for row in rows}
+        driver.close()
+        return result if result else {}
+    except Exception:
+        return {}
 
 
 def assign_tasks(blueprint: dict, skills: dict, api_key: str) -> dict:
@@ -88,24 +106,7 @@ def assign_tasks(blueprint: dict, skills: dict, api_key: str) -> dict:
 
     raw = response.text or ""
     payload = extract_json(raw)
-    result = json.loads(payload)
-
-    try:
-        existing = load_json_file(OUTPUT_FILE)
-        existing_assignments = {
-            str(task["id"]): task["assigned_to"]
-            for task in existing.get("tasks", [])
-            if task.get("id") and task.get("assigned_to")
-        }
-    except FileNotFoundError:
-        existing_assignments = {}
-
-    for task in result.get("tasks", []):
-        task_id = str(task.get("id", ""))
-        if task_id in existing_assignments:
-            task["assigned_to"] = existing_assignments[task_id]
-
-    return result
+    return json.loads(payload)
 
 
 def main() -> None:
@@ -116,14 +117,9 @@ def main() -> None:
             "GEMINI_API_KEY is not set. Add it to a .env file in the project root."
         )
 
-    blueprint = load_json_file(BLUEPRINT_FILE)
-    skills = load_json_file(SKILLS_FILE)
-
+    blueprint = json.loads(sys.stdin.read())
+    skills = fetch_skills_from_neo4j()
     assigned = assign_tasks(blueprint, skills, api_key)
-
-    with open(OUTPUT_FILE, "w", encoding="utf-8") as file:
-        json.dump(assigned, file, indent=2, ensure_ascii=False)
-
     print(json.dumps(assigned, indent=2, ensure_ascii=False))
 
 
