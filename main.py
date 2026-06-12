@@ -28,15 +28,13 @@ from search import (
     COLLECTION_NAME,
     get_embedding,
     index_tasks,
-    load_assigned_tasks,
 )
 from re_planner import (
     find_blocked_tasks,
     find_dependents,
-    load_assigned as load_replan_assigned,
     suggest_replan,
 )
-from standup import generate_standup, group_tasks_by_person, load_assigned
+from standup import generate_standup, group_tasks_by_person
 
 
 def verify_api_key(x_api_key: str = Header(default=None)) -> None:
@@ -70,15 +68,18 @@ def health() -> dict[str, Any]:
 @app.get("/team")
 def get_team() -> dict[str, Any]:
     try:
-        with open("skills.json", "r", encoding="utf-8") as file:
-            skills = json.load(file)
+        skills = fetch_skills_from_neo4j()
+        if not skills:
+            raise HTTPException(
+                status_code=404, detail="No team skills found in Neo4j"
+            )
         team = [
             {"name": name, "skills": skill_list}
             for name, skill_list in skills.items()
         ]
         return {"team": team}
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="skills.json not found")
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
