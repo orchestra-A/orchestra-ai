@@ -8,17 +8,11 @@ import chromadb
 from dotenv import load_dotenv
 from google import genai
 
-ASSIGNED_FILE = "assigned.json"
+from query import get_all_tasks
+
 COLLECTION_NAME = "orchestra"
 EMBEDDING_MODEL = "models/gemini-embedding-001"
 CHROMA_PATH = "chroma_db"
-
-
-def load_assigned_tasks(path: str) -> list[dict]:
-    """Read assigned tasks from JSON file."""
-    with open(path, "r", encoding="utf-8") as file:
-        payload = json.load(file)
-    return payload.get("tasks", [])
 
 
 def task_to_text(task: dict) -> str:
@@ -121,7 +115,7 @@ def main() -> None:
             "GEMINI_API_KEY is not set. Add it to a .env file in the project root."
         )
 
-    tasks = load_assigned_tasks(ASSIGNED_FILE)
+    tasks = get_all_tasks()
     if not tasks:
         raise RuntimeError("No tasks found in assigned.json.")
 

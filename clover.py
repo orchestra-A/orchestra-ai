@@ -11,13 +11,12 @@ from google import genai
 from google.genai import types
 
 from commit_intel import fetch_live_events
+from query import get_all_tasks
 from search import (
-    ASSIGNED_FILE,
     CHROMA_PATH,
     COLLECTION_NAME,
     get_embedding,
     index_tasks,
-    load_assigned_tasks,
 )
 
 MODEL_NAME = "gemini-2.5-flash-lite"
@@ -41,7 +40,7 @@ Always be specific — mention actual names, task IDs, titles, and timestamps in
 # Finds the 3 tasks that best match the user's question using semantic search.
 def search_top_tasks(question: str, api_key: str) -> list[dict]:
     """Find the 3 most relevant tasks using search.py helpers and ChromaDB."""
-    tasks = load_assigned_tasks(ASSIGNED_FILE)
+    tasks = get_all_tasks()
     if not tasks:
         raise RuntimeError("No tasks found in assigned.json.")
 
