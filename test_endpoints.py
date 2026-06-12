@@ -3,6 +3,7 @@
 import requests
 BASE_URL = "https://orchestra-ai-36zm.onrender.com"
 TIMEOUT = 120
+API_KEY_HEADER = {"X-API-Key": "orchestra-secret-2026"}
 
 
 def report(endpoint: str, passed: bool, detail: str = "") -> None:
@@ -19,6 +20,7 @@ def test_blueprint() -> dict | None:
         response = requests.post(
             f"{BASE_URL}/blueprint",
             json={"idea": "a todo app"},
+            headers=API_KEY_HEADER,
             timeout=TIMEOUT,
         )
         data = response.json()
@@ -83,6 +85,7 @@ def test_clover() -> None:
         response = requests.post(
             f"{BASE_URL}/clover",
             json={"question": "who is working on backend?"},
+            headers=API_KEY_HEADER,
             timeout=TIMEOUT,
         )
         data = response.json()
@@ -128,7 +131,9 @@ def test_tasks() -> None:
 def test_graph() -> None:
     endpoint = "GET /graph"
     try:
-        response = requests.get(f"{BASE_URL}/graph", timeout=TIMEOUT)
+        response = requests.get(
+            f"{BASE_URL}/graph", headers=API_KEY_HEADER, timeout=TIMEOUT
+        )
         data = response.json()
         passed = response.ok and "nodes" in data and "edges" in data
         report(endpoint, passed, f"status={response.status_code}")
@@ -142,6 +147,7 @@ def test_onboarding() -> None:
         response = requests.post(
             f"{BASE_URL}/onboarding",
             json={"github_username": "mitaalisingh"},
+            headers=API_KEY_HEADER,
             timeout=TIMEOUT,
         )
         data = response.json()
