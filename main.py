@@ -15,9 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from google import genai
 from pydantic import BaseModel
 
-from assign import OUTPUT_FILE as ASSIGNED_FILE
-from assign import assign_tasks
-from assign import fetch_skills_from_neo4j
+from assign import assign_tasks, fetch_skills_from_neo4j
 from blueprint import generate_blueprint
 from ingest import ingest_all
 from clover import ask_clover, search_top_tasks
@@ -88,10 +86,7 @@ def get_team() -> dict[str, Any]:
 @app.get("/project")
 def get_project() -> dict[str, Any]:
     try:
-        with open(ASSIGNED_FILE, "r", encoding="utf-8") as file:
-            data = json.load(file)
-
-        tasks = data.get("tasks", [])
+        tasks = get_all_tasks()
         by_status: dict[str, int] = {}
         by_person: dict[str, int] = {}
         by_track: dict[str, int] = {}
@@ -106,14 +101,14 @@ def get_project() -> dict[str, Any]:
             by_track[track] = by_track.get(track, 0) + 1
 
         return {
-            "project_name": data.get("project_name", ""),
+            "project_name": "Orchestra",
             "total_tasks": len(tasks),
             "by_status": by_status,
             "by_person": by_person,
             "by_track": by_track,
         }
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="assigned.json not found")
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -152,7 +147,7 @@ def get_api_key() -> str:
 
 def run_search(question: str, api_key: str, n_results: int = 3) -> list[dict[str, Any]]:
     """Index assigned tasks and return top 3 matches for a question."""
-    tasks = load_assigned_tasks(ASSIGNED_FILE)
+    tasks = get_all_tasks()
     if not tasks:
         raise HTTPException(status_code=404, detail="No tasks found in assigned.json.")
 
@@ -286,19 +281,20 @@ def standup() -> dict[str, str]:
     api_key = get_api_key()
 
     try:
-        assigned = load_assigned(ASSIGNED_FILE)
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail="assigned.json not found.") from exc
+        tasks = get_all_tasks()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503, detail=f"Graph database error: {exc}"
+        ) from exc
 
-    tasks = assigned.get("tasks", [])
     if not tasks:
         raise HTTPException(status_code=404, detail="No tasks found in assigned.json.")
 
     grouped = group_tasks_by_person(tasks)
     try:
-        standup_text = generate_standup(
-            grouped, assigned.get("project_name", "Project"), api_key
-        )
+        standup_text = generate_standup(grouped, "Orchestra", api_key)
     except Exception as exc:
         raise HTTPException(
             status_code=500, detail=f"Standup generation failed: {str(exc)}"
@@ -312,11 +308,14 @@ def replan() -> dict[str, Any]:
     api_key = get_api_key()
 
     try:
-        assigned = load_replan_assigned(ASSIGNED_FILE)
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail="assigned.json not found.") from exc
+        tasks = get_all_tasks()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503, detail=f"Graph database error: {exc}"
+        ) from exc
 
-    tasks = assigned.get("tasks", [])
     if not tasks:
         raise HTTPException(status_code=404, detail="No tasks found in assigned.json.")
 
@@ -324,7 +323,7 @@ def replan() -> dict[str, Any]:
     if not blocked_tasks:
         return {"suggestions": [], "message": "No blocked tasks found"}
 
-    project_name = assigned.get("project_name", "Project")
+    project_name = "Orchestra"
     suggestions: list[dict[str, Any]] = []
 
     for blocked_task in blocked_tasks:
