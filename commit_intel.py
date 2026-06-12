@@ -216,7 +216,7 @@ def main() -> None:
 
     client = genai.Client(api_key=api_key)
 
-    chroma_client = chromadb.PersistentClient(path=CHROMA_PATH)
+    chroma_client = chromadb.EphemeralClient()
     collection = chroma_client.get_or_create_collection(name=COLLECTION_NAME)
 
     for event in events:
