@@ -24,7 +24,6 @@ from graph_query import build_reactflow_graph
 from onboarding import build_profile
 from query import get_all_tasks
 from search import (
-    CHROMA_PATH,
     COLLECTION_NAME,
     get_embedding,
     index_tasks,
@@ -44,6 +43,9 @@ def verify_api_key(x_api_key: str = Header(default=None)) -> None:
 
 
 load_dotenv()
+
+_chroma_client = chromadb.EphemeralClient()
+_chroma_collection = _chroma_client.get_or_create_collection(name="orchestra")
 
 app = FastAPI(title="Orchestra + Clover API")
 
@@ -153,18 +155,10 @@ def run_search(question: str, api_key: str, n_results: int = 3) -> list[dict[str
         raise HTTPException(status_code=404, detail="No tasks found in assigned.json.")
 
     embed_client = genai.Client(api_key=api_key)
-    chroma_client = chromadb.PersistentClient(path=CHROMA_PATH)
-
-    try:
-        chroma_client.delete_collection(name=COLLECTION_NAME)
-    except Exception:
-        pass
-
-    collection = chroma_client.create_collection(name=COLLECTION_NAME)
-    index_tasks(collection, embed_client, tasks)
+    index_tasks(_chroma_collection, embed_client, tasks)
 
     query_embedding = get_embedding(embed_client, question)
-    results = collection.query(
+    results = _chroma_collection.query(
         query_embeddings=[query_embedding],
         n_results=n_results,
         include=["metadatas", "distances"],

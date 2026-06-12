@@ -13,7 +13,6 @@ from google.genai import types
 from commit_intel import fetch_live_events
 from query import get_all_tasks
 from search import (
-    CHROMA_PATH,
     COLLECTION_NAME,
     get_embedding,
     index_tasks,
@@ -45,7 +44,7 @@ def search_top_tasks(question: str, api_key: str) -> list[dict]:
         raise RuntimeError("No tasks found in assigned.json.")
 
     embed_client = genai.Client(api_key=api_key)
-    chroma_client = chromadb.PersistentClient(path=CHROMA_PATH)
+    chroma_client = chromadb.EphemeralClient()
     collection = chroma_client.get_or_create_collection(name=COLLECTION_NAME)
     index_tasks(collection, embed_client, tasks)
 
