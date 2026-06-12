@@ -12,7 +12,7 @@ from google.genai import types
 
 load_dotenv()
 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+
 MODEL_NAME = "gemini-2.5-flash"
 
 PROMPT_TEMPLATE = """You are a senior software architect. Break the following app idea
@@ -72,6 +72,7 @@ def extract_json(text: str) -> str:
 
 
 def generate_blueprint(idea: str) -> dict:
+    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
     if not GEMINI_API_KEY:
         raise RuntimeError(
             "GEMINI_API_KEY is not set. Add it to a .env file in the project root."
