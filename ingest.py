@@ -8,38 +8,12 @@ repeatedly MERGEs the same nodes and relationships rather than duplicating.
 
 import json
 import os
+import sys
 
 from dotenv import load_dotenv
 from neo4j import GraphDatabase
 
-ASSIGNED_FILE = "assigned.json"
-SKILL_GAP_FILE = "skill_gap_report.json"
-SKILLS_FILE = "skills.json"
 DEFAULT_STATUS = "todo"
-
-
-def resolve_task_source() -> str:
-    """Pick the task file to ingest.
-
-    assigned.json is the single source of truth (CONTRACTS.md §1): it carries
-    the full field set — status, created_at, updated_at, platform, priority,
-    project_id — with assignments across all five developers. We fall back to
-    skill_gap_report.json only if assigned.json is missing.
-    """
-    return ASSIGNED_FILE if os.path.exists(ASSIGNED_FILE) else SKILL_GAP_FILE
-
-
-def load_tasks(path: str) -> list[dict]:
-    """Read the roadmap tasks from JSON file."""
-    with open(path, "r", encoding="utf-8") as file:
-        payload = json.load(file)
-    return payload.get("tasks", [])
-
-
-def load_skills(path: str) -> dict:
-    """Read the developer -> skills mapping from JSON file."""
-    with open(path, "r", encoding="utf-8") as file:
-        return json.load(file)
 
 
 def create_constraints(session) -> None:
@@ -164,7 +138,8 @@ def print_summary(session) -> None:
     print(f"  Tasks w/ skill gap:   {counts['skill_gaps']}")
 
 
-def main() -> None:
+def ingest_all(tasks: list[dict], skills: dict) -> None:
+    """Run the full Neo4j ingestion pipeline for tasks and skills."""
     load_dotenv()
     uri = os.getenv("NEO4J_URI")
     username = os.getenv("NEO4J_USERNAME")
@@ -179,12 +154,8 @@ def main() -> None:
             "Add them to a .env file in the project root."
         )
 
-    source = resolve_task_source()
-    tasks = load_tasks(source)
     if not tasks:
-        raise RuntimeError(f"No tasks found in {source}.")
-    print(f"Loading tasks from {source}")
-    skills = load_skills(SKILLS_FILE)
+        raise RuntimeError("No tasks provided.")
 
     driver = GraphDatabase.driver(uri, auth=(username, password))
     try:
@@ -198,6 +169,13 @@ def main() -> None:
             print_summary(session)
     finally:
         driver.close()
+
+
+def main() -> None:
+    payload = json.loads(sys.stdin.read())
+    tasks = payload.get("tasks", [])
+    skills = payload.get("skills", {})
+    ingest_all(tasks, skills)
 
 
 if __name__ == "__main__":
