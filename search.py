@@ -120,7 +120,7 @@ def main() -> None:
         raise RuntimeError("No tasks found in assigned.json.")
 
     embed_client = genai.Client(api_key=api_key)
-    chroma_client = chromadb.PersistentClient(path=CHROMA_PATH)
+    chroma_client = chromadb.EphemeralClient()
     try:
         chroma_client.delete_collection(name=COLLECTION_NAME)
     except Exception:
