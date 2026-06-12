@@ -17,7 +17,9 @@ from pydantic import BaseModel
 
 from assign import OUTPUT_FILE as ASSIGNED_FILE
 from assign import assign_tasks
+from assign import fetch_skills_from_neo4j
 from blueprint import generate_blueprint
+from ingest import ingest_all
 from clover import ask_clover, search_top_tasks
 from commit_intel import fetch_live_events, main as run_commit_intel
 from graph_query import build_reactflow_graph
@@ -204,11 +206,20 @@ def create_blueprint(body: BlueprintRequest) -> dict[str, Any]:
         )
 
     try:
-        return generate_blueprint(body.idea.strip())
+        blueprint = generate_blueprint(body.idea.strip())
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    api_key = get_api_key()
+    try:
+        skills = fetch_skills_from_neo4j()
+        assigned = assign_tasks(blueprint, skills, api_key)
+        ingest_all(assigned.get("tasks", []), skills)
+        return assigned
+    except Exception:
+        return blueprint
 
 
 @app.post("/assign", dependencies=[Depends(verify_api_key)])
