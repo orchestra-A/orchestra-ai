@@ -8,8 +8,9 @@ from dotenv import load_dotenv
 from google import genai
 from google.genai import types
 
+from query import get_all_tasks
+
 MODEL_NAME = "gemini-2.5-flash-lite"
-ASSIGNED_FILE = "assigned.json"
 
 PROMPT_TEMPLATE = """You are formatting a daily standup update for an engineering team.
 
@@ -32,12 +33,6 @@ Rules:
 - Do not use markdown headers or bullet-heavy formatting — plain team-chat prose is fine.
 - Output only the standup message. No preamble or explanation.
 """
-
-
-def load_assigned(path: str) -> dict:
-    """Load assigned tasks from JSON file."""
-    with open(path, "r", encoding="utf-8") as file:
-        return json.load(file)
 
 
 def group_tasks_by_person(tasks: list[dict]) -> dict[str, dict[str, list[dict]]]:
@@ -121,15 +116,12 @@ def main() -> None:
             "GEMINI_API_KEY is not set. Add it to a .env file in the project root."
         )
 
-    assigned = load_assigned(ASSIGNED_FILE)
-    tasks = assigned.get("tasks", [])
+    tasks = get_all_tasks()
     if not tasks:
         raise RuntimeError("No tasks found in assigned.json.")
 
     grouped = group_tasks_by_person(tasks)
-    standup = generate_standup(
-        grouped, assigned.get("project_name", "Project"), api_key
-    )
+    standup = generate_standup(grouped, "Orchestra", api_key)
 
     print(standup)
 
