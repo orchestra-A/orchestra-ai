@@ -49,6 +49,7 @@ def test_assign(blueprint_data: dict | None) -> None:
                 "tasks": blueprint_data["tasks"],
                 "skills": {"Mitaali": ["Python", "AI"]},
             },
+            headers=API_KEY_HEADER,
             timeout=TIMEOUT,
         )
         data = response.json()
