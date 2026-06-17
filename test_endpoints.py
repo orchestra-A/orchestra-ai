@@ -3,7 +3,7 @@
 import requests
 BASE_URL = "https://orchestra-ai-36zm.onrender.com"
 TIMEOUT = 120
-API_KEY_HEADER = {"X-API-Key": "orchestra-secret-2026"}
+API_KEY_HEADER = {"X-API-Key": "hopefully_this_is_a_secret"}
 
 
 def report(endpoint: str, passed: bool, detail: str = "") -> None:
