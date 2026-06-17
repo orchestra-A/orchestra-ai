@@ -8,9 +8,10 @@ from dotenv import load_dotenv
 from google import genai
 from google.genai import types
 
+from assign import fetch_skills_from_neo4j
+from query import get_all_tasks
+
 MODEL_NAME = "gemini-2.5-flash"
-ASSIGNED_FILE = "assigned.json"
-SKILLS_FILE = "skills.json"
 OUTPUT_FILE = "skill_gap_report.json"
 
 PROMPT_TEMPLATE = """You are a technical lead reviewing whether the team can complete all assigned tasks.
@@ -67,12 +68,6 @@ def extract_json(text: str) -> str:
     return cleaned[start : end + 1]
 
 
-def load_json_file(path: str) -> dict:
-    """Load and parse a JSON file."""
-    with open(path, "r", encoding="utf-8") as file:
-        return json.load(file)
-
-
 def analyze_skill_gaps(assigned: dict, skills: dict, api_key: str) -> dict:
     """Call Gemini to detect skill gaps across all tasks."""
     client = genai.Client(api_key=api_key)
@@ -124,15 +119,17 @@ def main() -> None:
             "GEMINI_API_KEY is not set. Add it to a .env file in the project root."
         )
 
-    assigned = load_json_file(ASSIGNED_FILE)
-    skills = load_json_file(SKILLS_FILE)
+    tasks = get_all_tasks()
+    skills = fetch_skills_from_neo4j()
 
-    if not assigned.get("tasks"):
+    if not tasks:
         raise RuntimeError("No tasks found in assigned.json.")
     if not skills:
         raise RuntimeError("No team profiles found in skills.json.")
 
-    report = analyze_skill_gaps(assigned, skills, api_key)
+    report = analyze_skill_gaps(
+        {"tasks": tasks, "project_name": "Orchestra"}, skills, api_key
+    )
 
     with open(OUTPUT_FILE, "w", encoding="utf-8") as file:
         json.dump(report, file, indent=2, ensure_ascii=False)
