@@ -44,8 +44,8 @@ def verify_api_key(x_api_key: str = Header(default=None)) -> None:
 
 load_dotenv()
 
-_chroma_client = chromadb.EphemeralClient()
-_chroma_collection = _chroma_client.get_or_create_collection(name="orchestra")
+_chroma_client = None
+_chroma_collection = None
 
 app = FastAPI(title="Orchestra + Clover API")
 
@@ -57,6 +57,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.on_event("startup")
+async def init_chroma():
+    global _chroma_client, _chroma_collection
+    _chroma_client = chromadb.EphemeralClient()
+    _chroma_collection = _chroma_client.get_or_create_collection(name="orchestra")
+    print("[STARTUP] ChromaDB EphemeralClient initialised")
 
 @app.get("/health")
 def health() -> dict[str, Any]:

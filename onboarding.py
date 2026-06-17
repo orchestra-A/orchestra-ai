@@ -10,7 +10,8 @@ from google import genai
 from neo4j import GraphDatabase
 from google.genai import types
 
-from assign import BLUEPRINT_FILE, SKILLS_FILE, assign_tasks, load_json_file
+from assign import assign_tasks
+import json
 
 MODEL_NAME = "gemini-2.5-flash-lite"
 GITHUB_API = "https://api.github.com"
@@ -144,19 +145,9 @@ def analyze_profile(
 
 
 def save_skills(profile: dict) -> dict:
-    """Load skills.json, add or update this person's entry, and save back."""
-    try:
-        skills = load_json_file(SKILLS_FILE)
-    except FileNotFoundError:
-        skills = {}
-
-    member_name = profile.get("name") or profile.get("github", "")
-    skills[member_name] = profile.get("skills", [])
-
-    with open(SKILLS_FILE, "w", encoding="utf-8") as file:
-        json.dump(skills, file, indent=2, ensure_ascii=False)
-
-    return skills
+    """Build a skills dict from the profile — no file I/O needed."""
+    member_name = profile.get("name") or profile.get("username", "unknown")
+    return {member_name: profile.get("skills", [])}
 
 
 def save_to_neo4j(profile: dict) -> None:
@@ -222,7 +213,8 @@ def build_profile(username: str, api_key: str) -> dict:
     profile = analyze_profile(username, display_name, languages, api_key)
     skills = save_skills(profile)
     save_to_neo4j(profile)
-    blueprint = load_json_file(BLUEPRINT_FILE)
+    from query import get_all_tasks
+    blueprint = {"tasks": get_all_tasks()}
     assigned = assign_tasks(blueprint, skills, api_key)
 
     return {
