@@ -9,9 +9,9 @@ from google import genai
 from google.genai import types
 
 from assign import fetch_skills_from_neo4j
+from query import get_all_tasks
 
 MODEL_NAME = "gemini-2.5-flash-lite"
-ASSIGNED_FILE = "assigned.json"
 
 PROMPT_TEMPLATE = """You are an engineering delivery lead helping re-plan work around blockers.
 
@@ -48,12 +48,6 @@ Rules:
 - Keep each field concise and actionable.
 - Output JSON only, no markdown or extra text.
 """
-
-
-def load_assigned(path: str) -> dict:
-    """Load assigned tasks from JSON file."""
-    with open(path, "r", encoding="utf-8") as file:
-        return json.load(file)
 
 
 def find_blocked_tasks(tasks: list[dict]) -> list[dict]:
@@ -133,12 +127,11 @@ def main() -> None:
             "GEMINI_API_KEY is not set. Add it to a .env file in the project root."
         )
 
-    assigned = load_assigned(ASSIGNED_FILE)
-    tasks = assigned.get("tasks", [])
+    tasks = get_all_tasks()
+    project_name = "Orchestra"
     if not tasks:
         raise RuntimeError("No tasks found in assigned.json.")
 
-    project_name = assigned.get("project_name", "Project")
     blocked_tasks = find_blocked_tasks(tasks)
 
     suggestions: list[dict] = []
