@@ -26,6 +26,7 @@ comments, or any text outside the JSON. The JSON must match this exact schema:
 
 {{
   "project_name": "string",
+  "summary": "string",
   "tasks": [
     {{
       "id": "T1",
@@ -53,7 +54,8 @@ Rules:
 - "priority" must be exactly one of: "high", "medium", "low", based on task importance.
 - "project_id" must always be "P1".
 - Cover the full stack needed to ship the idea (UI, APIs, data, AI/ML pieces).
-- Output JSON only. No explanations."""
+- "summary" must be a short, plain-English explanation (3-5 sentences) of how you broke the work down and why — written so a teammate can quickly grasp the reasoning behind the task order and structure without reading every task.
+- Output JSON only. The "summary" field is the only place for explanation — do not add any text outside the JSON object itself."""
 
 
 def extract_json(text: str) -> str:

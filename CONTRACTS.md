@@ -48,12 +48,14 @@ Both scripts output a top-level JSON object:
 ```json
 {
   "project_name": "string",
+  "summary": "string",
   "tasks": [ ... ]
 }
 ```
 
 - `blueprint.py` writes to `blueprint.json` (tasks without `assigned_to`)
 - `assign.py` writes to `assigned.json` (tasks with `assigned_to` populated)
+- `summary` is a short, plain-English explanation of how the work was broken down. It is produced by `blueprint.py` and surfaced in the `POST /blueprint` response. Because `assign.py` regenerates the JSON, the API re-attaches `summary` after assignment — consumers should treat it as optional and render it if present.
 
 ---
 
@@ -127,7 +129,47 @@ Meaning: Task A cannot start until Task B is complete.
 
 ---
 
-## 4. Golden Rule
+## 4. Manual Skills Endpoint
+
+**Provided by:** `POST /team/manual` (`main.py` → `graph_query.merge_developer_skills`)
+**Consumed by:** the frontend skills form (manual fallback for `onboarding.py`)
+
+A human override for adding or correcting a developer's skills directly, without
+depending on GitHub-based AI inference. Requires the `x-api-key` header.
+
+**Request body:**
+
+```json
+{
+  "name": "Naman",
+  "skills": ["Python", "Neo4j", "FastAPI"]
+}
+```
+
+**Response** — the developer's full skill set after the merge:
+
+```json
+{
+  "name": "Naman",
+  "skills": ["FastAPI", "Neo4j", "Python"]
+}
+```
+
+### Behavior — merge, never overwrite
+
+- If the `Developer` node exists, the new skills are **added** to its existing
+  `HAS_SKILL` set; current skills are never removed.
+- If no `Developer` node exists, one is created with the given skills.
+- Skills are stored as `Skill` nodes joined by `(Developer)-[:HAS_SKILL]->(Skill)`
+  — the same representation `onboarding.py` and `ingest.py` use, so manually-added
+  skills are visible to `/team`, `/blueprint`, `/assign`, and `/graph`. `MERGE`
+  makes the write additive and duplicate-free (no APOC required).
+- Validation (no AI step to catch bad input): empty `name` or empty `skills`
+  returns `400`.
+
+---
+
+## 5. Golden Rule
 
 > **If you change any data format defined in this document, you must update this file first and notify the team in Discord before merging.**
 
@@ -142,4 +184,4 @@ Failure to follow this rule will break downstream scripts and integrations that 
 
 ---
 
-*Last updated: May 2026 — Orchestra + Clover Team*
+*Last updated: June 2026 — Orchestra + Clover Team*

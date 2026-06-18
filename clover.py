@@ -184,9 +184,14 @@ def ask_clover(
     prompt_parts = [f"Task context:\n{context_json}"]
 
     if conversation_history:
-        history_text = "Conversation history:\n"
+        history_text = "Conversation history (most recent last):\n"
         for item in conversation_history[-5:]:
             history_text += f"User: {item['question']}\nClover: {item['answer']}\n"
+        history_text += (
+            "\nIf the current question refers back to this conversation "
+            '(e.g. "those changes", "that task", "they"), resolve the reference '
+            "using the exchanges above."
+        )
         prompt_parts.append(history_text)
 
     # Try to add recent Discord and GitHub activity to the prompt.

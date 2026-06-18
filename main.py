@@ -20,7 +20,7 @@ from blueprint import generate_blueprint
 from ingest import ingest_all
 from clover import ask_clover, search_top_tasks
 from commit_intel import fetch_live_events, main as run_commit_intel
-from graph_query import build_reactflow_graph
+from graph_query import build_reactflow_graph, merge_developer_skills
 from onboarding import build_profile
 from query import get_all_tasks
 from search import (
@@ -92,6 +92,33 @@ def get_team() -> dict[str, Any]:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
+@app.post("/team/manual", dependencies=[Depends(verify_api_key)])
+def add_manual_skills(body: ManualSkillsRequest) -> dict[str, Any]:
+    """Manually add/correct a developer's skills in Neo4j.
+
+    Human fallback for `onboarding.py` (which only infers skills from public
+    GitHub). Merges — never overwrites: new skills are added to the developer's
+    existing HAS_SKILL set without removing or duplicating any. Returns the
+    developer's full current skill list after the merge.
+    """
+    name = body.name.strip()
+    skills = [s.strip() for s in body.skills if s and s.strip()]
+
+    if not name:
+        raise HTTPException(status_code=400, detail="name cannot be empty.")
+    if not skills:
+        raise HTTPException(status_code=400, detail="skills cannot be empty.")
+
+    try:
+        return merge_developer_skills(name, skills)
+    except RuntimeError as exc:  # missing NEO4J_* env vars
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except Exception as exc:  # Neo4j unavailable / query failure
+        raise HTTPException(
+            status_code=503, detail=f"Graph database error: {exc}"
+        ) from exc
+
+
 @app.get("/project")
 def get_project() -> dict[str, Any]:
     try:
@@ -142,6 +169,11 @@ class OnboardingRequest(BaseModel):
 
 class TaskStatusRequest(BaseModel):
     status: str
+
+
+class ManualSkillsRequest(BaseModel):
+    name: str
+    skills: list[str]
 
 
 def get_api_key() -> str:
@@ -212,6 +244,10 @@ def create_blueprint(body: BlueprintRequest) -> dict[str, Any]:
     try:
         skills = fetch_skills_from_neo4j()
         assigned = assign_tasks(blueprint, skills, api_key)
+        # assign_tasks regenerates the JSON and drops top-level keys it wasn't
+        # told about, so re-attach the blueprint's plain-English summary here
+        # rather than hoping the second model preserves it.
+        assigned["summary"] = blueprint.get("summary")
         ingest_all(assigned.get("tasks", []), skills)
         return assigned
     except Exception:
