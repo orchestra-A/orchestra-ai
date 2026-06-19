@@ -1,9 +1,15 @@
 """Smoke tests for the Orchestra API production endpoints."""
 
+import os
+
 import requests
+from dotenv import load_dotenv
+
+load_dotenv()
+
 BASE_URL = "https://orchestra-ai-36zm.onrender.com"
 TIMEOUT = 120
-API_KEY_HEADER = {"X-API-Key": "hopefully_this_is_a_secret"}
+API_KEY_HEADER = {"X-API-Key": os.getenv("INTERNAL_API_KEY", "")}
 
 
 def report(endpoint: str, passed: bool, detail: str = "") -> None:
