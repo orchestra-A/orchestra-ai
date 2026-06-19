@@ -52,6 +52,34 @@ def _database() -> Optional[str]:
     return os.getenv("NEO4J_DATABASE") or None
 
 
+def merge_developer_skills(name: str, new_skills: list[str]) -> dict[str, Any]:
+    """Add skills to a developer as Skill nodes + HAS_SKILL edges.
+
+    Creates the Developer node if it doesn't exist. MERGE makes this additive
+    and duplicate-free, so existing skills are never removed — this is the
+    manual fallback for `onboarding.py`'s GitHub-inferred skills. Returns the
+    developer's full current skill set after the merge.
+    """
+    driver = get_driver()
+    with driver.session(database=_database()) as session:
+        record = session.run(
+            """
+            MERGE (d:Developer {name: $name})
+            WITH d
+            UNWIND $new_skills AS skill_name
+              MERGE (s:Skill {name: skill_name})
+              MERGE (d)-[:HAS_SKILL]->(s)
+            WITH DISTINCT d
+            MATCH (d)-[:HAS_SKILL]->(s:Skill)
+            RETURN d.name AS name, collect(s.name) AS skills
+            """,
+            name=name,
+            new_skills=new_skills,
+        ).single()
+
+    return {"name": record["name"], "skills": sorted(record["skills"])}
+
+
 def _task_node(task: dict) -> dict[str, Any]:
     return {
         "id": task["id"],
