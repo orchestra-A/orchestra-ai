@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 from google import genai
 from google.genai import types
 
-MODEL_NAME = "gemini-2.0-flash-lite"
+MODEL_NAME = "gemini-2.5-flash-lite"
 EMBEDDING_MODEL = "models/gemini-embedding-001"
 ASSIGNED_FILE = "assigned.json"
 COLLECTION_NAME = "commits"
