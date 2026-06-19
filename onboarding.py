@@ -11,7 +11,6 @@ from neo4j import GraphDatabase
 from google.genai import types
 
 from assign import assign_tasks
-import json
 
 MODEL_NAME = "gemini-2.5-flash-lite"
 GITHUB_API = "https://api.github.com"
