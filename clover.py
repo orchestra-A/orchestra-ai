@@ -5,12 +5,12 @@ import os
 import sys
 
 import chromadb
-import requests
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
 
 from commit_intel import fetch_live_events
+from graph_query import build_reactflow_graph
 from query import get_all_tasks
 from search import (
     COLLECTION_NAME,
@@ -19,7 +19,6 @@ from search import (
 )
 
 MODEL_NAME = "gemini-2.5-flash-lite"
-GRAPH_API_URL = "https://orchestra-ai-36zm.onrender.com/graph"
 
 SYSTEM_PROMPT = """You are Clover, an AI project assistant for a software development team. You have access to three sources of context:
 1. Task context — structured task data with IDs, titles, assignees, tracks, and statuses
@@ -66,13 +65,17 @@ def search_top_tasks(question: str, api_key: str) -> list[dict]:
     return matches
 
 
-# Downloads the project knowledge graph from the Orchestra API.
+# Builds the project knowledge graph directly from Neo4j (in-process).
 def fetch_graph() -> dict | None:
-    """Fetch the project graph from the Orchestra API. Returns None on failure."""
+    """Build the project graph in-process from Neo4j. Returns None on failure.
+
+    Calls build_reactflow_graph() directly instead of doing an HTTP round-trip
+    to our own /graph endpoint: that self-call carries no x-api-key, so the auth
+    guard returns 401 and the graph context silently goes missing. In-process is
+    also faster and needs no network. Same {nodes, edges} shape either way.
+    """
     try:
-        response = requests.get(GRAPH_API_URL, timeout=15)
-        response.raise_for_status()
-        return response.json()
+        return build_reactflow_graph()
     except Exception:
         return None
 
