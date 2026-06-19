@@ -69,10 +69,10 @@ All platform events (GitHub, Slack, etc.) are normalized into this single format
 ```json
 {
   "platform": "github",
-  "member": "arnav",
-  "action": "pushed code",
+  "actor": "arnav",
+  "event_type": "pushed code",
   "timestamp": "2026-05-28T10:00:00",
-  "details": "Fixed login bug in auth.py"
+  "action_summary": "Fixed login bug in auth.py"
 }
 ```
 
@@ -81,10 +81,10 @@ All platform events (GitHub, Slack, etc.) are normalized into this single format
 | Field | Type | Description |
 |---|---|---|
 | `platform` | string | Source platform (e.g. `github`, `slack`, `jira`) |
-| `member` | string | Team member who performed the action (lowercase) |
-| `action` | string | What happened (e.g. `pushed code`, `opened PR`, `merged PR`) |
+| `actor` | string | Team member who performed the action (lowercase) |
+| `event_type` | string | What happened (e.g. `pushed code`, `opened PR`, `merged PR`) |
 | `timestamp` | string | ISO 8601 datetime of the event |
-| `details` | string | Human-readable description — typically the commit message or event summary |
+| `action_summary` | string | Human-readable description — typically the commit message or event summary |
 
 ---
 
