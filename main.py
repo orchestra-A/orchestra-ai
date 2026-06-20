@@ -92,6 +92,11 @@ def get_team() -> dict[str, Any]:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
+class ManualSkillsRequest(BaseModel):
+    name: str
+    skills: list[str]
+
+
 @app.post("/team/manual", dependencies=[Depends(verify_api_key)])
 def add_manual_skills(body: ManualSkillsRequest) -> dict[str, Any]:
     """Manually add/correct a developer's skills in Neo4j.
@@ -169,11 +174,6 @@ class OnboardingRequest(BaseModel):
 
 class TaskStatusRequest(BaseModel):
     status: str
-
-
-class ManualSkillsRequest(BaseModel):
-    name: str
-    skills: list[str]
 
 
 def get_api_key() -> str:
