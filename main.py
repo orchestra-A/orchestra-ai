@@ -46,6 +46,7 @@ load_dotenv()
 
 _chroma_client = None
 _chroma_collection = None
+_chroma_indexed = False
 
 app = FastAPI(title="Orchestra + Clover API")
 
@@ -188,12 +189,15 @@ def get_api_key() -> str:
 
 def run_search(question: str, api_key: str, n_results: int = 3) -> list[dict[str, Any]]:
     """Index assigned tasks and return top 3 matches for a question."""
+    global _chroma_indexed
     tasks = get_all_tasks()
     if not tasks:
         raise HTTPException(status_code=404, detail="No tasks found in assigned.json.")
 
     embed_client = genai.Client(api_key=api_key)
-    index_tasks(_chroma_collection, embed_client, tasks)
+    if not _chroma_indexed:
+        index_tasks(_chroma_collection, embed_client, tasks)
+        _chroma_indexed = True
 
     query_embedding = get_embedding(embed_client, question)
     results = _chroma_collection.query(
@@ -249,6 +253,8 @@ def create_blueprint(body: BlueprintRequest) -> dict[str, Any]:
         # rather than hoping the second model preserves it.
         assigned["summary"] = blueprint.get("summary")
         ingest_all(assigned.get("tasks", []), skills)
+        global _chroma_indexed
+        _chroma_indexed = False
         return assigned
     except Exception:
         return blueprint
