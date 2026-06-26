@@ -157,6 +157,7 @@ def get_project() -> dict[str, Any]:
 
 class BlueprintRequest(BaseModel):
     idea: str
+    project_id: str = "P1"
 
 
 class AssignRequest(BaseModel):
@@ -238,7 +239,7 @@ def create_blueprint(body: BlueprintRequest) -> dict[str, Any]:
         )
 
     try:
-        blueprint = generate_blueprint(body.idea.strip())
+        blueprint = generate_blueprint(body.idea.strip(), project_id=body.project_id)
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     except ValueError as exc:
