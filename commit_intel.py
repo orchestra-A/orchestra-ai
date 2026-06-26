@@ -65,9 +65,15 @@ def load_json_file(path: str) -> dict:
 
 def fetch_live_events() -> list:
     """Fetch live normalized events from the Orchestra backend."""
+    # The backend has moved Render accounts several times; read the current URL
+    # from env (BACKEND_URL) and fall back to the live deployment so this never
+    # silently points at a dead host again.
+    backend_url = os.getenv(
+        "BACKEND_URL", "https://orchestra-backend-30fy.onrender.com"
+    ).rstrip("/")
     try:
         response = requests.get(
-            "https://orchestra-backend-2v5a.onrender.com/events",
+            f"{backend_url}/events",
             timeout=30,
         )
         response.raise_for_status()
