@@ -36,7 +36,7 @@ comments, or any text outside the JSON. The JSON must match this exact schema:
       "dependencies": ["T0", "..."],
       "status": "todo",
       "priority": "high" | "medium" | "low",
-      "project_id": "P1",
+      "project_id": "{project_id}",
       "created_at": "2026-06-02T14:35:00+00:00",
       "updated_at": "2026-06-02T14:35:00+00:00",
       "platform": "github"
@@ -52,7 +52,7 @@ Rules:
 - "dependencies" is an array of task ids this task depends on (use [] if none).
 - "status" must always be "todo".
 - "priority" must be exactly one of: "high", "medium", "low", based on task importance.
-- "project_id" must always be "P1".
+- "project_id" must always be "{project_id}".
 - Cover the full stack needed to ship the idea (UI, APIs, data, AI/ML pieces).
 - "summary" must be a short, plain-English explanation (3-5 sentences) of how you broke the work down and why — written so a teammate can quickly grasp the reasoning behind the task order and structure without reading every task.
 - Output JSON only. The "summary" field is the only place for explanation — do not add any text outside the JSON object itself."""
@@ -73,7 +73,7 @@ def extract_json(text: str) -> str:
     return cleaned[start : end + 1]
 
 
-def generate_blueprint(idea: str) -> dict:
+def generate_blueprint(idea: str, project_id: str = "P1") -> dict:
     GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
     if not GEMINI_API_KEY:
         raise RuntimeError(
@@ -84,7 +84,7 @@ def generate_blueprint(idea: str) -> dict:
 
     response = client.models.generate_content(
         model=MODEL_NAME,
-        contents=PROMPT_TEMPLATE.format(idea=idea),
+        contents=PROMPT_TEMPLATE.format(idea=idea, project_id=project_id),
         config=types.GenerateContentConfig(
             temperature=0.0,
             response_mime_type="application/json",
