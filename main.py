@@ -227,6 +227,26 @@ def run_search(question: str, api_key: str, n_results: int = 3) -> list[dict[str
     return matches
 
 
+def push_tasks_to_backend(tasks: list[dict]) -> int:
+    """POST each task to the Orchestra backend. Returns count of successes."""
+    backend_url = os.getenv(
+        "BACKEND_URL", "https://orchestra-backend-30fy.onrender.com"
+    )
+    succeeded = 0
+    for task in tasks:
+        try:
+            response = requests.post(
+                f"{backend_url}/tasks",
+                json=task,
+                timeout=30,
+            )
+            response.raise_for_status()
+            succeeded += 1
+        except Exception:
+            continue
+    return succeeded
+
+
 @app.post("/blueprint", dependencies=[Depends(verify_api_key)])
 def create_blueprint(body: BlueprintRequest) -> dict[str, Any]:
     """Generate a task roadmap from a raw app idea."""
@@ -254,6 +274,10 @@ def create_blueprint(body: BlueprintRequest) -> dict[str, Any]:
         # rather than hoping the second model preserves it.
         assigned["summary"] = blueprint.get("summary")
         ingest_all(assigned.get("tasks", []), skills)
+        try:
+            push_tasks_to_backend(assigned.get("tasks", []))
+        except Exception:
+            pass
         global _chroma_indexed
         _chroma_indexed = False
         return assigned
