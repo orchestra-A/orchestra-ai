@@ -80,7 +80,19 @@ def fetch_live_events() -> list:
         data = response.json()
         if data.get("total", 0) == 0:
             return []
-        return data.get("events", [])
+        events = data.get("events", [])
+        EVENT_TYPE_MAP = {
+            "push": "pushed code",
+            "pull_request": "opened PR",
+            "merged": "merged PR",
+            "issue": "opened issue",
+            "release": "created release",
+            "message": "sent message",
+        }
+        for event in events:
+            raw = event.get("event_type", "")
+            event["event_type"] = EVENT_TYPE_MAP.get(raw, raw)
+        return events
     except Exception:
         return []
 
