@@ -158,6 +158,7 @@ def get_project() -> dict[str, Any]:
 class BlueprintRequest(BaseModel):
     idea: str
     project_id: str = "P1"
+    members: list[str] = []
 
 
 class AssignRequest(BaseModel):
@@ -268,6 +269,9 @@ def create_blueprint(body: BlueprintRequest) -> dict[str, Any]:
     api_key = get_api_key()
     try:
         skills = fetch_skills_from_neo4j()
+        for member in body.members:
+            if member not in skills:
+                skills[member] = []
         assigned = assign_tasks(blueprint, skills, api_key)
         # assign_tasks regenerates the JSON and drops top-level keys it wasn't
         # told about, so re-attach the blueprint's plain-English summary here
