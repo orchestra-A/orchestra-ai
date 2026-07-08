@@ -10,7 +10,7 @@ from google import genai
 from neo4j import GraphDatabase
 from google.genai import types
 
-from assign import assign_tasks
+from assign import assign_tasks, fetch_skills_from_neo4j
 
 MODEL_NAME = "gemini-2.5-flash-lite"
 GITHUB_API = "https://api.github.com"
@@ -210,8 +210,8 @@ def build_profile(username: str, api_key: str) -> dict:
         raise RuntimeError(f"No language data found for user '{username}'.")
 
     profile = analyze_profile(username, display_name, languages, api_key)
-    skills = save_skills(profile)
     save_to_neo4j(profile)
+    skills = fetch_skills_from_neo4j()
     from query import get_all_tasks
     blueprint = {"tasks": get_all_tasks()}
     assigned = assign_tasks(blueprint, skills, api_key)
