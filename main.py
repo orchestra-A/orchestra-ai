@@ -156,8 +156,9 @@ def get_project() -> dict[str, Any]:
 
 
 class BlueprintRequest(BaseModel):
-    idea: str
-    project_id: str = "P1"
+    name: str
+    description: str
+    tech_stack: list[str] = []
     members: list[str] = []
 
 
@@ -250,17 +251,23 @@ def push_tasks_to_backend(tasks: list[dict]) -> int:
 
 @app.post("/blueprint", dependencies=[Depends(verify_api_key)])
 def create_blueprint(body: BlueprintRequest) -> dict[str, Any]:
-    """Generate a task roadmap from a raw app idea."""
-    if not body.idea.strip():
-        raise HTTPException(status_code=400, detail="idea cannot be empty.")
-    if len(body.idea.strip()) > 2000:
+    """Generate a task roadmap from a project name, description, and tech stack."""
+    name = body.name.strip()
+    description = body.description.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="name cannot be empty.")
+    if not description:
+        raise HTTPException(status_code=400, detail="description cannot be empty.")
+    if len(description) > 2000:
         raise HTTPException(
             status_code=400,
-            detail="App idea is too long. Maximum 2000 characters allowed.",
+            detail="Description is too long. Maximum 2000 characters allowed.",
         )
 
+    tech_stack = [s.strip() for s in body.tech_stack if s and s.strip()]
+
     try:
-        blueprint = generate_blueprint(body.idea.strip(), project_id=body.project_id)
+        blueprint = generate_blueprint(name, description, tech_stack)
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     except ValueError as exc:

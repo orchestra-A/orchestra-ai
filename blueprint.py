@@ -1,9 +1,10 @@
-"""Generate a structured project blueprint from a raw app idea using Gemini."""
+"""Generate a structured project blueprint from project details using Gemini."""
 
 import json
 import os
 import re
 import sys
+import uuid
 from datetime import datetime, timezone
 
 from dotenv import load_dotenv
@@ -15,11 +16,17 @@ load_dotenv()
 
 MODEL_NAME = "gemini-2.5-flash"
 
-PROMPT_TEMPLATE = """You are a senior software architect. Break the following app idea
+PROMPT_TEMPLATE = """You are a senior software architect. Break the following project
 into a structured project blueprint.
 
-App idea:
-\"\"\"{idea}\"\"\"
+Project name:
+\"\"\"{name}\"\"\"
+
+Description:
+\"\"\"{description}\"\"\"
+
+Tech stack:
+\"\"\"{tech_stack}\"\"\"
 
 Return ONLY a single valid JSON object. Do not include markdown fences, prose,
 comments, or any text outside the JSON. The JSON must match this exact schema:
@@ -53,7 +60,8 @@ Rules:
 - "status" must always be "todo".
 - "priority" must be exactly one of: "high", "medium", "low", based on task importance.
 - "project_id" must always be "{project_id}".
-- Cover the full stack needed to ship the idea (UI, APIs, data, AI/ML pieces).
+- "project_name" should match the given project name.
+- Prefer the listed tech stack when shaping tasks; cover the full stack needed to ship (UI, APIs, data, AI/ML pieces as relevant).
 - "summary" must be a short, plain-English explanation (3-5 sentences) of how you broke the work down and why — written so a teammate can quickly grasp the reasoning behind the task order and structure without reading every task.
 - Output JSON only. The "summary" field is the only place for explanation — do not add any text outside the JSON object itself."""
 
@@ -73,18 +81,35 @@ def extract_json(text: str) -> str:
     return cleaned[start : end + 1]
 
 
-def generate_blueprint(idea: str, project_id: str = "P1") -> dict:
+def _new_project_id() -> str:
+    return f"P{uuid.uuid4().hex[:8]}"
+
+
+def generate_blueprint(
+    name: str,
+    description: str,
+    tech_stack: list[str] | None = None,
+) -> dict:
     GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
     if not GEMINI_API_KEY:
         raise RuntimeError(
             "GEMINI_API_KEY is not set. Add it to a .env file in the project root."
         )
 
+    project_id = _new_project_id()
+    stack = tech_stack or []
+    tech_stack_text = ", ".join(stack) if stack else "(not specified)"
+
     client = genai.Client(api_key=GEMINI_API_KEY)
 
     response = client.models.generate_content(
         model=MODEL_NAME,
-        contents=PROMPT_TEMPLATE.format(idea=idea, project_id=project_id),
+        contents=PROMPT_TEMPLATE.format(
+            name=name,
+            description=description,
+            tech_stack=tech_stack_text,
+            project_id=project_id,
+        ),
         config=types.GenerateContentConfig(
             temperature=0.0,
             response_mime_type="application/json",
@@ -99,17 +124,25 @@ def generate_blueprint(idea: str, project_id: str = "P1") -> dict:
         task["created_at"] = now_iso
         task["updated_at"] = now_iso
         task["platform"] = "github"
+        task["project_id"] = project_id
 
+    blueprint["project_name"] = name
     return blueprint
 
 
 def main() -> None:
     if len(sys.argv) > 1:
-        idea = " ".join(sys.argv[1:])
+        description = " ".join(sys.argv[1:])
+        name = "CLI Project"
+        tech_stack: list[str] = []
     else:
-        idea = "A mobile app that uses AI to suggest recipes from a photo of your fridge."
+        name = "Fridge Recipe App"
+        description = (
+            "A mobile app that uses AI to suggest recipes from a photo of your fridge."
+        )
+        tech_stack = ["React Native", "Python", "Gemini"]
 
-    blueprint = generate_blueprint(idea)
+    blueprint = generate_blueprint(name, description, tech_stack)
     print(json.dumps(blueprint, indent=2, ensure_ascii=False))
 
 
