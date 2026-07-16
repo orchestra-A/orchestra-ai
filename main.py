@@ -249,6 +249,35 @@ def push_tasks_to_backend(tasks: list[dict]) -> int:
     return succeeded
 
 
+def push_project_to_backend(
+    name: str,
+    description: str,
+    tech_stack: list[str],
+    members: list[str],
+    project_id: str,
+) -> bool:
+    """POST project details to the Orchestra backend. Returns True on success."""
+    backend_url = os.getenv(
+        "BACKEND_URL", "https://orchestra-backend-30fy.onrender.com"
+    )
+    try:
+        response = requests.post(
+            f"{backend_url}/projects",
+            json={
+                "name": name,
+                "description": description,
+                "tech_stack": tech_stack,
+                "members": members,
+                "project_id": project_id,
+            },
+            timeout=30,
+        )
+        response.raise_for_status()
+        return True
+    except Exception:
+        return False
+
+
 @app.post("/blueprint", dependencies=[Depends(verify_api_key)])
 def create_blueprint(body: BlueprintRequest) -> dict[str, Any]:
     """Generate a task roadmap from a project name, description, and tech stack."""
@@ -287,6 +316,16 @@ def create_blueprint(body: BlueprintRequest) -> dict[str, Any]:
         ingest_all(assigned.get("tasks", []), skills)
         try:
             push_tasks_to_backend(assigned.get("tasks", []))
+        except Exception:
+            pass
+        try:
+            push_project_to_backend(
+                name=name,
+                description=description,
+                tech_stack=tech_stack,
+                members=body.members,
+                project_id=blueprint.get("project_id", ""),
+            )
         except Exception:
             pass
         global _chroma_indexed

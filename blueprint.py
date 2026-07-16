@@ -127,6 +127,7 @@ def generate_blueprint(
         task["project_id"] = project_id
 
     blueprint["project_name"] = name
+    blueprint["project_id"] = project_id
     return blueprint
 
 
