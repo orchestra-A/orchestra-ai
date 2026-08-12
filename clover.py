@@ -929,6 +929,22 @@ def _is_first_person_task_q(question: str) -> bool:
     return bool(_FIRST_PERSON_RE.search(question) and _SELF_TASK_RE.search(question))
 
 
+# "who am i", "what's my name/username/handle" — identity questions. Kept separate
+# from task questions so we can answer them from resolved identity, and crucially
+# refuse to GUESS one from recent activity when we can't (which produced wrong,
+# ever-changing answers like a random event actor's handle).
+_IDENTITY_Q_RE = re.compile(
+    r"who\s+am\s+i|what'?s\s+my\s+(?:name|username|handle|user\s*name)|"
+    r"what\s+is\s+my\s+(?:name|username|handle|user\s*name)|my\s+username",
+    re.IGNORECASE,
+)
+
+
+def _is_identity_question(question: str) -> bool:
+    """True if the user is asking who they are / what their username is."""
+    return bool(_IDENTITY_Q_RE.search(question))
+
+
 def _handle_core(s: str) -> str:
     """Reduce a handle to its leading name token, lowercased.
 
@@ -1039,6 +1055,7 @@ def _identity_prompt_parts(
     hand Gemini the project-scoped list so it can match by any handle itself.
     """
     first_person = _is_first_person_task_q(question)
+    identity_q = _is_identity_question(question)
     if identity and identity.get("display"):
         display = identity["display"]
         aliases = identity.get("aliases") or []
@@ -1047,7 +1064,8 @@ def _identity_prompt_parts(
             f"User identity: you are talking to {display}. In task data this person "
             f"may appear as any of these handles: {alias_str} — the assigned_to field "
             "usually uses a short display name (often the first name). When the user "
-            'says "my", "me", "mine", or "I", they mean tasks assigned to this person.'
+            'says "my", "me", "mine", or "I", they mean tasks assigned to this person. '
+            f"If they ask who they are or for their username, tell them: {display}."
         ]
         if first_person and prefiltered:
             parts.append(
@@ -1075,13 +1093,17 @@ def _identity_prompt_parts(
                 f"here:\n{json.dumps(slim, indent=2, ensure_ascii=False)}"
             )
         return parts
-    if first_person:
-        # We genuinely don't know who's asking — the request arrived without a
-        # user id/handle. Ask, but warmly, instead of a cold refusal.
+    if first_person or identity_q:
+        # We couldn't resolve who's asking (no identity sent, or the id didn't match
+        # any user record). Critically: do NOT let the model invent a name from
+        # recent activity — that produced wrong, ever-changing answers. Say we don't
+        # know and ask, warmly.
         return [
-            "The user is asking about their own tasks, but this request carried no "
-            "identity (no user id or handle). Warmly ask which name or handle to "
-            "look under — one short sentence, no lecture."
+            "You could NOT determine who the user is — the request carried no "
+            "resolvable identity. Do NOT guess their name or username from recent "
+            "activity, events, or task data; that would be wrong. In one friendly "
+            "sentence, say you're not sure who they are and ask them to tell you "
+            "their username."
         ]
     return []
 
