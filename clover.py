@@ -105,21 +105,37 @@ def fetch_github_username(user_id: str) -> str | None:
         return None
 
 
-# Fetches the full user directory from the backend (best-effort).
+# In-process cache for the user directory. The backend's /users is slow (~6s) and
+# the list barely changes, so re-fetching it on every Clover call both wastes time
+# and risks timing out under the request's concurrent load — which silently breaks
+# handle resolution ("my tasks" can't map a GitHub name to the username tasks are
+# keyed by). Cache it and serve stale on failure.
+_USERS_CACHE: dict = {"data": [], "ts": 0.0}
+_USERS_TTL = 300  # seconds
+
+
+# Fetches the full user directory from the backend (cached, best-effort).
 def fetch_users() -> list[dict]:
-    """Return the backend's user list, or [] on failure.
+    """Return the backend's user list (cached ~5 min), or the last good list.
 
     Each row carries the person's several handles — Orchestra `username`,
     `github_username`, `discord_username` — which we use to recognise the current
     user in task data no matter which handle the frontend sent us.
     """
+    now = time.time()
+    if _USERS_CACHE["data"] and (now - _USERS_CACHE["ts"] < _USERS_TTL):
+        return _USERS_CACHE["data"]
     backend_url = os.getenv("BACKEND_URL", "https://orchestra-backend-30fy.onrender.com")
     try:
-        resp = requests.get(f"{backend_url}/users", timeout=10)
+        resp = requests.get(f"{backend_url}/users", timeout=20)
         resp.raise_for_status()
-        return resp.json().get("users", [])
+        users = resp.json().get("users", [])
+        if users:
+            _USERS_CACHE["data"] = users
+            _USERS_CACHE["ts"] = now
+        return users
     except Exception:
-        return []
+        return _USERS_CACHE["data"]  # serve the last good directory on a slow/failed call
 
 
 # Fetches the list of project IDs the user belongs to from the backend.
