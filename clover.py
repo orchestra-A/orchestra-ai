@@ -151,6 +151,30 @@ def fetch_user_project_ids(user_id: str) -> list[str]:
         return []
 
 
+# Mirrors a Clover-driven status change to the backend's PATCH /tasks/{id}/status.
+# The kanban reads Postgres, not the graph, so a graph-only write left the board
+# stale. Best-effort — the graph write remains the source of truth for Clover.
+def push_task_status_to_backend(task_id: str, new_status: str) -> bool:
+    backend_url = os.getenv("BACKEND_URL", "https://orchestra-backend-30fy.onrender.com")
+    try:
+        resp = requests.patch(
+            f"{backend_url}/tasks/{task_id}/status",
+            json={"status": new_status},
+            timeout=15,
+        )
+        return resp.ok
+    except Exception:
+        return False
+
+
+# Applies a status change to BOTH stores: the Neo4j graph (Clover's own reads) and
+# the backend Postgres (the kanban). Returns the graph result so callers can tell
+# whether the task existed. Writing both keeps Clover, /tasks and the board in sync.
+def apply_status_change(task_id: str, new_status: str) -> dict | None:
+    result = patch_task_status(task_id, new_status)
+    push_task_status_to_backend(task_id, new_status)
+    return result
+
 
 # Finds the 3 tasks that best match the user's question using semantic search.
 def search_top_tasks(question: str, api_key: str, project_id: str | None = None, allowed_project_ids: list[str] | None = None, tasks: list[dict] | None = None) -> list[dict]:
@@ -488,7 +512,7 @@ def stream_answer(
         new_status = pending_action.get("new_status")
         title = pending_action.get("title", task_id)
         if task_id and new_status:
-            result = patch_task_status(task_id, new_status)
+            result = apply_status_change(task_id, new_status)
             if result:
                 msg = f"Done — I've marked \"{title}\" as {new_status}."
             else:
@@ -584,7 +608,7 @@ def stream_answer(
     action = _detect_task_action(question)
     if action:
         task_id, new_status = action
-        result = patch_task_status(task_id, new_status)
+        result = apply_status_change(task_id, new_status)
         task_update = {
             "task_id": task_id,
             "new_status": new_status,

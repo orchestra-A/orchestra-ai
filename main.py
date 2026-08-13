@@ -171,6 +171,7 @@ class CloverRequest(BaseModel):
     github_username: str | None = None
     user_id: str | None = None
     user_name: str | None = None
+    pending_action: dict | None = None
 
 
 class OnboardingRequest(BaseModel):
@@ -502,6 +503,7 @@ def clover(body: CloverRequest) -> StreamingResponse:
                 github_username=body.github_username,
                 user_id=body.user_id,
                 user_name=body.user_name,
+                pending_action=body.pending_action,
             ):
                 yield f"data: {chunk_json}\n\n"
         except Exception as exc:
