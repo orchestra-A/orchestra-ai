@@ -518,7 +518,15 @@ def clover(body: CloverRequest) -> StreamingResponse:
             else:
                 msg = f"Clover failed: {type(exc).__name__}: {exc}"
                 code = 500
+            # Emit the message as a chunk too, not just an error event. A client
+            # that builds its answer only from `chunk` events (and ignores the
+            # error event) would otherwise end up with empty text and render the
+            # raw response envelope. Sending a chunk guarantees the user sees
+            # readable text instead of blank JSON. Keep the error event for
+            # clients that do handle it (status code, styling).
+            yield f"data: {json.dumps({'chunk': msg})}\n\n"
             yield f"data: {json.dumps({'error': msg, 'status': code})}\n\n"
+            yield f"data: {json.dumps({'done': True, 'conversation_history': (body.conversation_history or [])[-5:]})}\n\n"
 
     return StreamingResponse(generate(), media_type="text/event-stream")
 
