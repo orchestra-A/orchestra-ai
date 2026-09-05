@@ -440,6 +440,164 @@ def create_blueprint(body: BlueprintRequest) -> dict[str, Any]:
         return blueprint
 
 
+@app.post("/blueprint/stream", dependencies=[Depends(verify_api_key)])
+def create_blueprint_stream(body: BlueprintRequest) -> StreamingResponse:
+    """Streaming (SSE) version of /blueprint — fixes D-01 and D-04.
+
+    The non-streaming POST /blueprint holds ONE connection open for ~90s while
+    it runs 4 Gemini calls (validate → blueprint → assign → skill-gap) plus
+    Neo4j ingest and the backend push. That exceeds the 60s proxy timeout, so:
+    the proxy returns 504, the frontend auto-retries against the direct URL,
+    and BOTH runs finish and save a project → duplicate projects (D-01). The
+    UI also has nothing to show during the wait but a static spinner (D-04).
+
+    Streaming defeats both. Bytes flow every few seconds (one progress event
+    per pipeline step), so the proxy never goes idle, never 504s, and the
+    frontend never fires the ghost retry. The same events drive a real
+    step/elapsed UI instead of a blind spinner.
+
+    SSE contract (text/event-stream, one JSON object per `data:` line):
+      data: {"status": "Designing project structure..."}   — progress step
+      data: {"done": true, "project": {...}}                 — final payload (terminal)
+      data: {"error": "message", "status": 400}              — failure (terminal)
+
+    The final `project` object is byte-for-byte what POST /blueprint returns
+    (assigned tasks + summary + project_id + tech_stack + skill_gaps), so a
+    client can switch endpoints without changing how it reads the result.
+
+    Integration notes for the rest of the team:
+      - Arnav: the proxy must forward chunks UNBUFFERED (as /clover already is)
+        and must NOT auto-retry this endpoint — the stream is the anti-timeout.
+      - Isha/Prince: read with response.body.getReader(); show `status` on the
+        spinner; build the project from the `done` event's `project`. Disable
+        the Create button until `done`/`error` arrives (double-click is a
+        separate front-end cause of duplicates that streaming does not cover).
+    """
+    api_key = get_api_key()
+    name = body.name.strip()
+    description = body.description.strip()
+    # Fast, synchronous input validation up front. Safe to raise a real HTTP
+    # error here because the stream body hasn't started yet.
+    if not name:
+        raise HTTPException(status_code=400, detail="name cannot be empty.")
+    if not description:
+        raise HTTPException(status_code=400, detail="description cannot be empty.")
+    if len(description) > 2000:
+        raise HTTPException(
+            status_code=400,
+            detail="Description is too long. Maximum 2000 characters allowed.",
+        )
+
+    tech_stack = [s.strip() for s in body.tech_stack if s and s.strip()]
+
+    def sse(payload: dict) -> str:
+        return f"data: {json.dumps(payload)}\n\n"
+
+    def generate():
+        # Phase 1 — validate + generate. Failures here are terminal (mirror the
+        # 400/500/502 the non-streaming endpoint raises, but as error events).
+        try:
+            yield sse({"status": "Validating project description..."})
+            error = validate_description(name, description, api_key)
+            if error:
+                yield sse(
+                    {"error": f"Invalid project description: {error}", "status": 400}
+                )
+                return
+
+            yield sse({"status": "Designing project structure..."})
+            blueprint = generate_blueprint(
+                name, description, tech_stack, project_id=body.project_id,
+            )
+        except RuntimeError as exc:
+            yield sse({"error": str(exc), "status": 500})
+            return
+        except ValueError as exc:
+            yield sse({"error": str(exc), "status": 502})
+            return
+        except Exception as exc:
+            yield sse(
+                {
+                    "error": f"Blueprint generation failed: {type(exc).__name__}: {exc}",
+                    "status": 500,
+                }
+            )
+            return
+
+        # Phase 2 — assign, skill-gap, ingest, push. Mirrors POST /blueprint,
+        # which degrades to the unassigned blueprint if any of this fails, so
+        # here we still emit `done` with the generated blueprint rather than an
+        # error if a later step throws.
+        try:
+            yield sse({"status": "Assigning tasks to your team..."})
+            known_skills = fetch_skills_from_neo4j()
+            if body.members:
+                skills = {member: known_skills.get(member, []) for member in body.members}
+            else:
+                skills = known_skills
+            assigned = assign_tasks(blueprint, skills, api_key)
+
+            project_id = blueprint.get("project_id", "")
+            summary = blueprint.get("summary", "")
+            assigned["summary"] = summary
+            assigned["project_id"] = project_id
+            assigned["tech_stack"] = tech_stack
+            for task in assigned.get("tasks", []):
+                task["project_id"] = project_id
+
+            yield sse({"status": "Checking for skill gaps..."})
+            try:
+                gap_report = analyze_skill_gaps(
+                    {"tasks": assigned.get("tasks", []), "project_name": name},
+                    skills,
+                    api_key,
+                )
+                gap_by_id = {t["id"]: t for t in gap_report.get("tasks", [])}
+                for task in assigned.get("tasks", []):
+                    gap_task = gap_by_id.get(task["id"], {})
+                    task["gap_detected"] = gap_task.get("gap_detected", False)
+                    task["missing_skill_or_role"] = gap_task.get("missing_skill_or_role")
+                assigned["skill_gaps"] = [
+                    {"id": t["id"], "title": t["title"], "missing": t.get("missing_skill_or_role")}
+                    for t in assigned.get("tasks", [])
+                    if t.get("gap_detected")
+                ]
+            except Exception:
+                pass
+
+            yield sse({"status": "Saving to the knowledge graph..."})
+            ingest_all(assigned.get("tasks", []), skills)
+
+            yield sse({"status": "Syncing with the backend..."})
+            # Push the project FIRST so its row (with our pinned id) exists
+            # before the tasks reference it — same ordering as POST /blueprint.
+            try:
+                push_project_to_backend(
+                    name=name,
+                    description=description,
+                    tech_stack=tech_stack,
+                    members=body.members,
+                    project_id=project_id,
+                    summary=summary,
+                    created_by=body.created_by,
+                )
+            except Exception:
+                pass
+            try:
+                push_tasks_to_backend(assigned.get("tasks", []))
+            except Exception:
+                pass
+            invalidate_index()
+
+            yield sse({"done": True, "project": assigned})
+        except Exception:
+            # Graceful fallback identical to POST /blueprint's `return blueprint`:
+            # hand back the generated (unassigned) blueprint rather than nothing.
+            yield sse({"done": True, "project": blueprint})
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
+
+
 @app.post("/assign", dependencies=[Depends(verify_api_key)])
 def assign(body: AssignRequest) -> dict[str, Any]:
     """Assign tasks to team members based on skills."""
