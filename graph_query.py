@@ -80,6 +80,30 @@ def merge_developer_skills(name: str, new_skills: list[str]) -> dict[str, Any]:
     return {"name": record["name"], "skills": sorted(record["skills"])}
 
 
+def ensure_developer(name: str) -> dict[str, Any]:
+    """Create the Developer node (with no skills) if it doesn't exist yet.
+
+    merge_developer_skills can't be called with an empty skill list — its
+    `UNWIND $new_skills` produces zero rows and kills the query — so this is the
+    path for adding a member who hasn't listed any skills yet. Returns the
+    developer's current skill set (empty for a brand-new node).
+    """
+    driver = get_driver()
+    with driver.session(database=_database()) as session:
+        record = session.run(
+            """
+            MERGE (d:Developer {name: $name})
+            WITH d
+            OPTIONAL MATCH (d)-[:HAS_SKILL]->(s:Skill)
+            RETURN d.name AS name,
+                   [x IN collect(s.name) WHERE x IS NOT NULL] AS skills
+            """,
+            name=name,
+        ).single()
+
+    return {"name": record["name"], "skills": sorted(record["skills"])}
+
+
 def _task_node(task: dict) -> dict[str, Any]:
     return {
         "id": task["id"],
@@ -89,6 +113,7 @@ def _task_node(task: dict) -> dict[str, Any]:
             "track": task.get("track"),
             "status": task.get("status"),
             "assigned_to": task.get("assigned_to"),
+            "points": task.get("points"),
             "gap_detected": bool(task.get("gap_detected")),
             "missing_skill_or_role": task.get("missing_skill_or_role"),
         },
@@ -141,6 +166,7 @@ def build_reactflow_graph(
                 MATCH (t:Task)
                 RETURN t.id AS id, t.title AS title, t.track AS track,
                        t.status AS status, t.assigned_to AS assigned_to,
+                       t.points AS points,
                        t.gap_detected AS gap_detected,
                        t.missing_skill_or_role AS missing_skill_or_role
                 ORDER BY t.id

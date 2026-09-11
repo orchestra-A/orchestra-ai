@@ -30,6 +30,23 @@ def project_id_from_task_id(task_id) -> str | None:
     return m.group(1) if m else None
 
 
+def next_task_id(project_id: str, existing_ids) -> str:
+    """Mint the next '{project_id}-T{n}' id for a project.
+
+    n is one past the highest existing -T suffix among that project's task ids,
+    so ids stay stable and collision-free when a task is added to an existing
+    project (the same scheme blueprint.py generates). Falls back to T1 when the
+    project has no numbered tasks yet.
+    """
+    max_n = 0
+    suffix = re.compile(rf"^{re.escape(project_id)}-T(\d+)$")
+    for tid in existing_ids:
+        m = suffix.match(str(tid or ""))
+        if m:
+            max_n = max(max_n, int(m.group(1)))
+    return f"{project_id}-T{max_n + 1}"
+
+
 def summary(session) -> None:
     """Print node and relationship counts for a quick sanity check."""
     counts = session.run(
@@ -234,6 +251,7 @@ def get_all_tasks() -> list[dict]:
                        t.status AS status,
                        t.assigned_to AS assigned_to,
                        t.project_id AS project_id,
+                       t.points AS points,
                        dependencies,
                        t.created_at AS created_at,
                        t.updated_at AS updated_at
@@ -253,6 +271,136 @@ def get_all_tasks() -> list[dict]:
             task["project_id"] = project_id_from_task_id(task["id"])
     tasks.sort(key=lambda t: _task_sort_key(t["id"]))
     return tasks
+
+
+def reassignable_tasks(project_id: str | None = None) -> list[dict]:
+    """Tasks that are SAFE to move to a newly-added member.
+
+    A task is reassignable if it is unassigned or still `upcoming` (not started)
+    — moving those costs nobody any work. Tasks that are in_progress, completed,
+    or blocked are deliberately excluded: someone has already invested in them,
+    so the rebalance never rips them away. This is the pool the smart "add
+    member" flow rebalances over; pass project_id to scope to one project.
+
+    Returns id, title, track, description, status, assigned_to, project_id and
+    points for each task (enough to skill-rank and load-balance).
+    """
+    load_dotenv()
+    uri = os.getenv("NEO4J_URI")
+    username = os.getenv("NEO4J_USERNAME")
+    password = os.getenv("NEO4J_PASSWORD")
+    database = os.getenv("NEO4J_DATABASE") or None
+
+    if not all([uri, username, password]):
+        raise RuntimeError(
+            "NEO4J_URI, NEO4J_USERNAME and NEO4J_PASSWORD must be set. "
+            "Add them to a .env file in the project root."
+        )
+
+    driver = GraphDatabase.driver(uri, auth=(username, password))
+    try:
+        driver.verify_connectivity()
+        with driver.session(database=database) as session:
+            rows = session.run(
+                """
+                MATCH (t:Task)
+                WHERE ($project_id IS NULL OR t.project_id = $project_id)
+                  AND (t.assigned_to IS NULL OR t.assigned_to = ''
+                       OR t.status = 'upcoming')
+                RETURN t.id AS id, t.title AS title, t.track AS track,
+                       t.description AS description, t.status AS status,
+                       t.assigned_to AS assigned_to, t.project_id AS project_id,
+                       t.points AS points
+                """,
+                project_id=project_id,
+            )
+            tasks = [dict(row) for row in rows]
+    finally:
+        driver.close()
+
+    return tasks
+
+
+def capacity_by_developer(project_id: str | None = None) -> dict:
+    """Story-point load and velocity per developer, summed over ASSIGNED_TO.
+
+    This is what story points buy a graph: instead of counting tasks (which
+    treats a 1-point tweak and a 13-point migration as equal), we weight each
+    developer's load by effort. For each developer we return:
+      - task_count        how many tasks they're assigned
+      - total_points      sum of points across those tasks (their load)
+      - completed_points  points already done  (their velocity)
+      - remaining_points  points still open    (total - completed)
+    Ordered by remaining_points DESC so the most-loaded person is first.
+
+    Pass project_id to scope to a single project; omit for the whole graph.
+    Also returns a project-wide totals block for a quick burn-up read.
+    """
+    load_dotenv()
+    uri = os.getenv("NEO4J_URI")
+    username = os.getenv("NEO4J_USERNAME")
+    password = os.getenv("NEO4J_PASSWORD")
+    database = os.getenv("NEO4J_DATABASE") or None
+
+    if not all([uri, username, password]):
+        raise RuntimeError(
+            "NEO4J_URI, NEO4J_USERNAME and NEO4J_PASSWORD must be set. "
+            "Add them to a .env file in the project root."
+        )
+
+    driver = GraphDatabase.driver(uri, auth=(username, password))
+    try:
+        driver.verify_connectivity()
+        with driver.session(database=database) as session:
+            per_dev = [
+                dict(r)
+                for r in session.run(
+                    """
+                    MATCH (d:Developer)-[:ASSIGNED_TO]->(t:Task)
+                    WHERE $project_id IS NULL OR t.project_id = $project_id
+                    WITH d.name AS developer,
+                         count(t) AS task_count,
+                         sum(coalesce(t.points, 0)) AS total_points,
+                         sum(CASE WHEN t.status = $done
+                                  THEN coalesce(t.points, 0) ELSE 0 END)
+                           AS completed_points
+                    RETURN developer, task_count, total_points, completed_points,
+                           total_points - completed_points AS remaining_points
+                    ORDER BY remaining_points DESC, developer
+                    """,
+                    project_id=project_id,
+                    done=DONE_STATUS,
+                )
+            ]
+            totals = session.run(
+                """
+                MATCH (t:Task)
+                WHERE $project_id IS NULL OR t.project_id = $project_id
+                RETURN count(t) AS task_count,
+                       sum(coalesce(t.points, 0)) AS total_points,
+                       sum(CASE WHEN t.status = $done
+                                THEN coalesce(t.points, 0) ELSE 0 END)
+                         AS completed_points
+                """,
+                project_id=project_id,
+                done=DONE_STATUS,
+            ).single()
+    finally:
+        driver.close()
+
+    total_pts = totals["total_points"] or 0
+    done_pts = totals["completed_points"] or 0
+    return {
+        "project_id": project_id,
+        "developers": per_dev,
+        "totals": {
+            "task_count": totals["task_count"] or 0,
+            "total_points": total_pts,
+            "completed_points": done_pts,
+            "remaining_points": total_pts - done_pts,
+            "percent_complete": round(100 * done_pts / total_pts, 1) if total_pts else 0.0,
+        },
+    }
 
 
 def main() -> None:

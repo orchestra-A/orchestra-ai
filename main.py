@@ -16,15 +16,22 @@ from google import genai
 from google.genai import types
 from pydantic import BaseModel
 
+from add_member import rank_fit, select_rebalance
+from add_task import place_task
 from assign import assign_tasks, fetch_skills_from_neo4j
-from blueprint import extract_json, generate_blueprint
+from blueprint import ALLOWED_POINTS, DEFAULT_POINTS, extract_json, generate_blueprint
 from ingest import ingest_all
 from skill_gap import analyze_skill_gaps
 from clover import answer_question, stream_answer
 from commit_intel import fetch_live_events, main as run_commit_intel
-from graph_query import build_reactflow_graph, merge_developer_skills
+from graph_query import build_reactflow_graph, ensure_developer, merge_developer_skills
 from onboarding import build_profile
-from query import get_all_tasks
+from query import (
+    capacity_by_developer,
+    get_all_tasks,
+    next_task_id,
+    reassignable_tasks,
+)
 from search import (
     ensure_indexed,
     get_embedding,
@@ -146,6 +153,29 @@ def get_project() -> dict[str, Any]:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
+@app.get("/capacity")
+def get_capacity(
+    project_id: str | None = Query(
+        None, description="Scope to a single project; omit for the whole graph"
+    ),
+) -> dict[str, Any]:
+    """Story-point load and velocity per developer, weighted by effort.
+
+    Returns each developer's assigned / completed / remaining points (so the
+    most-loaded person surfaces first) plus a project-wide totals block with a
+    percent-complete burn-up. This is the payoff of storing points on the
+    graph: capacity by effort, not by raw task count.
+    """
+    try:
+        return capacity_by_developer(project_id=project_id)
+    except RuntimeError as exc:  # missing NEO4J_* env vars
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except Exception as exc:  # Neo4j unavailable / query failure
+        raise HTTPException(
+            status_code=503, detail=f"Graph database error: {exc}"
+        ) from exc
+
+
 class BlueprintRequest(BaseModel):
     name: str
     description: str
@@ -182,6 +212,10 @@ class TaskStatusRequest(BaseModel):
     status: str
 
 
+class PointsRequest(BaseModel):
+    points: int
+
+
 class TaskEditRequest(BaseModel):
     # All optional — a PATCH may touch just one field. Status is intentionally
     # excluded; it has its own endpoint (PATCH /tasks/{id}/status).
@@ -189,6 +223,26 @@ class TaskEditRequest(BaseModel):
     description: str | None = None
     assigned_to: str | None = None
     track: str | None = None
+
+
+class AddTaskRequest(BaseModel):
+    # Smart add: the AI picks the assignee, points, track, and dependencies, so
+    # the caller only needs the project and what the task is. track is optional —
+    # supply it to pin the section, or leave it blank and Gemini infers one
+    # consistent with the project's existing tracks.
+    project_id: str
+    title: str
+    description: str = ""
+    track: str | None = None
+
+
+class AddMemberRequest(BaseModel):
+    # Smart add: register the member's skills, then let them absorb open work.
+    # project_id scopes the gap top-up to one project; omit to consider open
+    # tasks across the whole graph.
+    name: str
+    skills: list[str] = []
+    project_id: str | None = None
 
 
 def get_api_key() -> str:
@@ -391,12 +445,18 @@ def create_blueprint(body: BlueprintRequest) -> dict[str, Any]:
         assigned["summary"] = summary
         assigned["project_id"] = project_id
         assigned["tech_stack"] = tech_stack
+        # assign_tasks regenerates the task JSON and can drop fields it wasn't
+        # told to preserve, so re-attach the story-point estimate blueprint.py
+        # already computed, keyed by task id — same defensive pattern as
+        # project_id below.
+        points_by_id = {t.get("id"): t.get("points") for t in blueprint.get("tasks", [])}
         # Stamp every task with the project id so the backend links each task row
         # to its project (task.project_id == project.id). assign_tasks drops the
         # project_id that blueprint.py set, so without this the tasks land
         # orphaned (project_id null) and never surface under the project.
         for task in assigned.get("tasks", []):
             task["project_id"] = project_id
+            task["points"] = points_by_id.get(task.get("id"), task.get("points"))
 
         # Detect skill gaps and stamp them onto tasks before ingestion so
         # Neo4j stores gap_detected / missing_skill_or_role from the start.
@@ -542,8 +602,12 @@ def create_blueprint_stream(body: BlueprintRequest) -> StreamingResponse:
             assigned["summary"] = summary
             assigned["project_id"] = project_id
             assigned["tech_stack"] = tech_stack
+            # Re-attach the story-point estimate blueprint.py computed (assign
+            # can drop it during regeneration) — same as project_id below.
+            points_by_id = {t.get("id"): t.get("points") for t in blueprint.get("tasks", [])}
             for task in assigned.get("tasks", []):
                 task["project_id"] = project_id
+                task["points"] = points_by_id.get(task.get("id"), task.get("points"))
 
             yield sse({"status": "Checking for skill gaps..."})
             try:
@@ -867,6 +931,65 @@ def update_task_status(task_id: str, body: TaskStatusRequest) -> dict[str, Any]:
         ) from exc
 
 
+@app.patch("/tasks/{task_id}/points", dependencies=[Depends(verify_api_key)])
+def update_task_points(task_id: str, body: PointsRequest) -> dict[str, Any]:
+    """Set a task's story-point estimate in the Neo4j graph.
+
+    Manual override for the Fibonacci estimate blueprint.py assigns at
+    generation time — a PM re-points one task without regenerating the roadmap.
+    Points are graph-only for now (no backend column yet), so this writes to
+    Neo4j only; see the story-points plan for the eventual Postgres mirror.
+    """
+    if body.points not in ALLOWED_POINTS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid points. Must be one of the Fibonacci scale: "
+            f"{', '.join(str(p) for p in ALLOWED_POINTS)}.",
+        )
+
+    try:
+        uri = os.getenv("NEO4J_URI")
+        username = os.getenv("NEO4J_USERNAME")
+        password = os.getenv("NEO4J_PASSWORD")
+        database = os.getenv("NEO4J_DATABASE") or None
+
+        if not all([uri, username, password]):
+            raise RuntimeError(
+                "NEO4J_URI, NEO4J_USERNAME and NEO4J_PASSWORD must be set. "
+                "Add them to a .env file in the project root."
+            )
+
+        driver = GraphDatabase.driver(uri, auth=(username, password))
+        try:
+            driver.verify_connectivity()
+            with driver.session(database=database) as session:
+                record = session.run(
+                    """
+                    MATCH (t:Task {id: $task_id})
+                    SET t.points = $points, t.updated_at = $updated_at
+                    RETURN t.id AS id, t.points AS points
+                    """,
+                    task_id=task_id,
+                    points=body.points,
+                    updated_at=datetime.utcnow().isoformat(),
+                ).single()
+        finally:
+            driver.close()
+
+        if record is None:
+            raise HTTPException(status_code=404, detail=f"Task '{task_id}' not found.")
+
+        return {"id": record["id"], "points": record["points"]}
+    except HTTPException:
+        raise
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503, detail=f"Graph database error: {exc}"
+        ) from exc
+
+
 def push_task_edit_to_backend(task_id: str, fields: dict[str, Any]) -> bool:
     """Best-effort: mirror a task field edit to the backend Postgres.
 
@@ -1003,6 +1126,285 @@ def edit_task(task_id: str, body: TaskEditRequest) -> dict[str, Any]:
         raise HTTPException(
             status_code=503, detail=f"Graph database error: {exc}"
         ) from exc
+
+
+@app.post("/tasks", dependencies=[Depends(verify_api_key)])
+def add_task(body: AddTaskRequest) -> dict[str, Any]:
+    """Smart-add one task to an EXISTING project — no blueprint regeneration.
+
+    Mints the next '{project_id}-T{n}' id, then asks Gemini to place the task in
+    context: pick the best-fit assignee from the people already on the project,
+    estimate story points, choose a track consistent with the existing ones, and
+    detect dependencies on tasks already in the project. Nothing already in the
+    graph is modified — we only insert the new task node and its edges. The AI
+    placement is best-effort: if it fails, the task is still created unassigned
+    with no dependencies rather than the request erroring out.
+    """
+    project_id = body.project_id.strip()
+    title = body.title.strip()
+    description = body.description.strip()
+    if not project_id:
+        raise HTTPException(status_code=400, detail="project_id cannot be empty.")
+    if not title:
+        raise HTTPException(status_code=400, detail="title cannot be empty.")
+
+    api_key = get_api_key()
+
+    try:
+        all_tasks = get_all_tasks()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503, detail=f"Graph database error: {exc}"
+        ) from exc
+
+    existing = [t for t in all_tasks if t.get("project_id") == project_id]
+    existing_ids = {t.get("id") for t in existing}
+
+    # Roster = the people already working this project (so we don't hand the task
+    # to someone on a different project). Fall back to the whole team when the
+    # project has no assigned tasks yet (e.g. its first added task).
+    known_skills = fetch_skills_from_neo4j()
+    roster = {t.get("assigned_to") for t in existing if t.get("assigned_to")}
+    skills = {m: known_skills.get(m, []) for m in roster} if roster else known_skills
+
+    new_id = next_task_id(project_id, existing_ids)
+
+    placement: dict[str, Any] = {
+        "assigned_to": None,
+        "track": body.track,
+        "points": None,
+        "dependencies": [],
+    }
+    try:
+        placement = place_task(
+            {"title": title, "description": description, "track": body.track},
+            existing,
+            skills,
+            api_key,
+        )
+    except Exception:
+        pass  # degrade to an unassigned, dependency-free task
+
+    # Validate the model's output against reality: an assignee must be a real
+    # roster member (else leave unassigned), and every dependency must be an
+    # existing task id in this project (drop hallucinated ids).
+    assignee = placement.get("assigned_to")
+    if assignee not in skills:
+        assignee = None
+    dependencies = [d for d in placement.get("dependencies", []) if d in existing_ids]
+    points = placement.get("points") or DEFAULT_POINTS
+    track = (placement.get("track") or body.track or "general").strip() or "general"
+
+    now_iso = datetime.utcnow().isoformat()
+    task: dict[str, Any] = {
+        "id": new_id,
+        "title": title,
+        "track": track,
+        "description": description,
+        "status": "upcoming",
+        "assigned_to": assignee,
+        "points": points,
+        "dependencies": dependencies,
+        "project_id": project_id,
+        "created_at": now_iso,
+        "updated_at": now_iso,
+        "platform": "github",
+    }
+
+    # A brand-new task has no stale ASSIGNED_TO edge, so ingest_all is safe here
+    # (unlike the reassignment path in POST /members). ingest_skills re-merges the
+    # roster's HAS_SKILL edges — idempotent, no-op in practice.
+    try:
+        ingest_all([task], skills)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503, detail=f"Graph database error: {exc}"
+        ) from exc
+
+    try:
+        push_tasks_to_backend([task])
+    except Exception:
+        pass
+    invalidate_index()
+
+    return task
+
+
+def _reassign_tasks_in_graph(session, tasks: list[dict]) -> None:
+    """Update assignee / gap / points AND re-point the ASSIGNED_TO edge per task.
+
+    Used by the member top-up, where a task can move between developers. A plain
+    MERGE (as ingest_assignments does) would leave the old edge in place — two
+    assignees on one task — so we delete any existing ASSIGNED_TO edge first,
+    then MERGE the new one only when there's an assignee (same fix as edit_task).
+    """
+    for t in tasks:
+        session.run(
+            """
+            MATCH (t:Task {id: $id})
+            SET t.assigned_to = $assigned_to,
+                t.gap_detected = $gap_detected,
+                t.missing_skill_or_role = $missing,
+                t.points = coalesce($points, t.points),
+                t.updated_at = $updated_at
+            WITH t
+            OPTIONAL MATCH (:Developer)-[r:ASSIGNED_TO]->(t)
+            DELETE r
+            WITH t
+            FOREACH (_ IN CASE
+                       WHEN $assigned_to IS NULL OR $assigned_to = '' THEN []
+                       ELSE [1] END |
+                MERGE (d:Developer {name: $assigned_to})
+                MERGE (d)-[:ASSIGNED_TO]->(t))
+            """,
+            id=t.get("id"),
+            assigned_to=t.get("assigned_to"),
+            gap_detected=bool(t.get("gap_detected")),
+            missing=t.get("missing_skill_or_role"),
+            points=t.get("points"),
+            updated_at=datetime.utcnow().isoformat(),
+        )
+
+
+@app.post("/members", dependencies=[Depends(verify_api_key)])
+def add_member(body: AddMemberRequest) -> dict[str, Any]:
+    """Smart-add a team member — register them, then rebalance work onto them.
+
+    Adding a person is additive, never a full reshuffle. We create the Developer
+    node (+ HAS_SKILL edges), then give the newcomer a fair share of the effort
+    by moving tasks onto them — but ONLY tasks that are unassigned or still
+    `upcoming` (not started), and weighted by story points so the load balances
+    by effort, not task count. In-progress / completed / blocked work is never
+    touched, and the blueprint is not regenerated. The rebalance is best-effort:
+    if the AI/graph steps fail, the member is still registered.
+
+    Which tasks suit the newcomer is a Gemini skill-fit call; how many to move is
+    a deterministic point-balance (see add_member.select_rebalance) that pulls
+    from the most-loaded teammates and stops at the fair share.
+    """
+    name = body.name.strip()
+    member_skills = [s.strip() for s in body.skills if s and s.strip()]
+    if not name:
+        raise HTTPException(status_code=400, detail="name cannot be empty.")
+
+    # 1. Register the member (create Developer + HAS_SKILL). Additive / idempotent.
+    try:
+        if member_skills:
+            developer = merge_developer_skills(name, member_skills)
+        else:
+            developer = ensure_developer(name)
+    except RuntimeError as exc:  # missing NEO4J_* env vars
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except Exception as exc:  # Neo4j unavailable / query failure
+        raise HTTPException(
+            status_code=503, detail=f"Graph database error: {exc}"
+        ) from exc
+
+    # Without skills we can't skill-match work to them — register and stop.
+    if not member_skills:
+        return {
+            "developer": developer,
+            "considered": 0,
+            "moved": [],
+            "note": "Member added. Add their skills to auto-assign work.",
+        }
+
+    # 2. Gather the safe-to-move pool (unassigned or upcoming). None -> done.
+    try:
+        candidates = reassignable_tasks(body.project_id)
+    except Exception:
+        candidates = []
+    if not candidates:
+        return {
+            "developer": developer,
+            "considered": 0,
+            "moved": [],
+            "note": "No unassigned or not-yet-started tasks available to rebalance.",
+        }
+
+    # 3. Rebalance. Best-effort: any failure leaves the member registered and the
+    #    board untouched.
+    api_key = get_api_key()
+    moved_summary: list[dict[str, Any]] = []
+    try:
+        # Current load per existing developer, and the team size incl. the newcomer.
+        cap = capacity_by_developer(project_id=body.project_id)
+        loads = {d["developer"]: d.get("remaining_points", 0) for d in cap.get("developers", [])}
+        num_devs_incl_new = len(loads) + (0 if name in loads else 1)
+
+        # Which candidates suit the new member (Gemini). Fall back to all
+        # candidates in their existing order so they still get work if the model
+        # call fails — better to over-offer than to leave them idle.
+        try:
+            fit_ids = rank_fit(name, member_skills, candidates, api_key)
+        except Exception:
+            fit_ids = []
+        if not fit_ids:
+            fit_ids = [c["id"] for c in candidates]
+
+        move_ids = select_rebalance(candidates, fit_ids, loads, num_devs_incl_new)
+        cand_by_id = {c["id"]: c for c in candidates}
+
+        # Build the updates. Moved tasks now belong to the newcomer, who fits them
+        # by construction, so clear any skill-gap flag. Keep each task's points.
+        updates = [
+            {
+                "id": tid,
+                "assigned_to": name,
+                "gap_detected": False,
+                "missing_skill_or_role": None,
+                "points": cand_by_id[tid].get("points"),
+            }
+            for tid in move_ids
+            if tid in cand_by_id
+        ]
+
+        if updates:
+            uri = os.getenv("NEO4J_URI")
+            username = os.getenv("NEO4J_USERNAME")
+            password = os.getenv("NEO4J_PASSWORD")
+            database = os.getenv("NEO4J_DATABASE") or None
+            driver = GraphDatabase.driver(uri, auth=(username, password))
+            try:
+                driver.verify_connectivity()
+                with driver.session(database=database) as session:
+                    _reassign_tasks_in_graph(session, updates)
+            finally:
+                driver.close()
+
+            # Mirror each reassignment to the backend (PATCH assignee). Best-effort
+            # — no-op until the backend exposes a task field PATCH (see edit_task).
+            for tid in move_ids:
+                try:
+                    push_task_edit_to_backend(tid, {"assigned_to": name})
+                except Exception:
+                    pass
+            invalidate_index()
+
+        moved_summary = [
+            {
+                "id": tid,
+                "title": cand_by_id[tid].get("title"),
+                "points": cand_by_id[tid].get("points"),
+                "from": cand_by_id[tid].get("assigned_to") or "unassigned",
+            }
+            for tid in move_ids
+            if tid in cand_by_id
+        ]
+    except Exception:
+        pass  # member already registered; rebalance is best-effort
+
+    return {
+        "developer": developer,
+        "considered": len(candidates),
+        "moved": moved_summary,
+        "assigned_to_new_member": len(moved_summary),
+        "points_taken": sum(m.get("points") or 0 for m in moved_summary),
+    }
 
 
 @app.get("/graph", dependencies=[Depends(verify_api_key)])

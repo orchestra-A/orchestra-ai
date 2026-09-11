@@ -25,7 +25,7 @@ MODEL_NAME = "gemini-2.5-flash"
 _UNSET = object()
 
 SYSTEM_PROMPT = """You are Clover, an AI project assistant for a software development team. You have access to three sources of context:
-1. Task context — structured task data with IDs, titles, assignees, tracks, and statuses
+1. Task context — structured task data with IDs, titles, assignees, tracks, statuses, and story points (an agile Fibonacci effort estimate: 1/2/3/5/8/13, where higher means more effort — not calendar time)
 2. Graph context — knowledge graph showing relationships between people, tasks, and skills
 3. Recent activity context — live Discord and GitHub events showing what the team has been doing
 
@@ -753,6 +753,27 @@ def stream_answer(
             "- Next pick high-priority todos with no unresolved blockers.\n"
             "- Skip blocked tasks entirely for today.\n"
             "- Be honest and specific — name exactly which tasks to focus on and why, don't just list everything.",
+        )
+
+    if _needs_points_summary(question):
+        if project_id:
+            scoped_pts = [t for t in all_tasks if t.get("project_id") == project_id]
+        elif allowed_project_ids:
+            scoped_pts = [t for t in all_tasks if t.get("project_id") in allowed_project_ids]
+        else:
+            scoped_pts = all_tasks
+        prompt_parts.insert(
+            0,
+            "Story-point capacity context. Points use the Fibonacci scale "
+            "(1/2/3/5/8/13) and measure relative effort, NOT time. These "
+            "per-developer totals are already aggregated from the task graph — "
+            "trust them, do not recount:\n"
+            f"{json.dumps(_points_summary(scoped_pts), indent=2, ensure_ascii=False)}\n"
+            "total_points = assigned load, completed_points = velocity (done), "
+            "remaining_points = still open. The list is sorted by remaining_points "
+            "descending, so the most-loaded person is first. Answer the user's "
+            "points / load / velocity question directly from these figures, in "
+            "plain conversational text.",
         )
 
     if task_update_prompt:
@@ -1512,6 +1533,51 @@ def _needs_events(question: str) -> bool:
 def _needs_capacity_planning(question: str) -> bool:
     q = question.lower()
     return any(kw in q for kw in _CAPACITY_KEYWORDS)
+
+
+# Story-point questions ("how many points do I have", "who's overloaded",
+# "team velocity") are aggregate-by-effort, distinct from the daily "what can I
+# finish today" planner above — they need per-developer point totals, not a
+# to-do triage. Bare "load" is deliberately excluded (too broad, e.g. "load the
+# page"); "workload"/"team load" are specific enough.
+_POINTS_KEYWORDS = {
+    "story point", "story points", "points", "velocity", "workload",
+    "work load", "team load", "overloaded", "burndown", "burn down",
+    "burn-up", "point load", "most work", "effort",
+}
+
+
+def _needs_points_summary(question: str) -> bool:
+    q = question.lower()
+    return any(kw in q for kw in _POINTS_KEYWORDS)
+
+
+def _points_summary(tasks: list[dict]) -> list[dict]:
+    """Aggregate story points per assignee from an already-fetched task list.
+
+    Computed in-process (no extra Neo4j round-trip) so Clover can ground team
+    load / velocity answers in real totals instead of eyeballing a task dump.
+    Returns per-developer rows sorted by remaining_points (most-loaded first):
+    total_points (load), completed_points (velocity), remaining_points (open).
+    """
+    agg: dict[str, dict] = {}
+    for t in tasks:
+        who = str(t.get("assigned_to") or "Unassigned")
+        try:
+            pts = int(t.get("points") or 0)
+        except (TypeError, ValueError):
+            pts = 0
+        row = agg.setdefault(
+            who,
+            {"developer": who, "task_count": 0, "total_points": 0, "completed_points": 0},
+        )
+        row["task_count"] += 1
+        row["total_points"] += pts
+        if str(t.get("status", "")).strip().lower() == "completed":
+            row["completed_points"] += pts
+    for row in agg.values():
+        row["remaining_points"] = row["total_points"] - row["completed_points"]
+    return sorted(agg.values(), key=lambda r: r["remaining_points"], reverse=True)
 
 
 # Answers a question, running the three independent retrievals concurrently.

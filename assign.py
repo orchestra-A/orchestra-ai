@@ -35,6 +35,7 @@ Return ONLY a single valid JSON object with this exact shape:
       "dependencies": ["T0"],
       "status": "upcoming",
       "priority": "high",
+      "points": 3,
       "deadline": "2026-08-15T00:00:00+00:00",
       "project_id": "string",
       "platform": "github",

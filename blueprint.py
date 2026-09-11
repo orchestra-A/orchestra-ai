@@ -16,6 +16,28 @@ load_dotenv()
 
 MODEL_NAME = "gemini-2.5-flash"
 
+# Story points use the Fibonacci scale. Anything the model returns off-scale
+# (4, 6, 0, a string, or nothing) is snapped to the nearest allowed value so the
+# graph only ever stores a clean estimate — the capacity / velocity queries sum
+# these, so a stray value would quietly skew the totals.
+ALLOWED_POINTS = (1, 2, 3, 5, 8, 13)
+DEFAULT_POINTS = 3
+
+
+def normalize_points(raw) -> int:
+    """Coerce any points value to the Fibonacci scale (1/2/3/5/8/13).
+
+    Missing / non-numeric falls back to DEFAULT_POINTS; an in-range but
+    off-scale number (e.g. 4, 6, 10) snaps to the nearest allowed value.
+    """
+    try:
+        val = int(round(float(raw)))
+    except (TypeError, ValueError):
+        return DEFAULT_POINTS
+    if val in ALLOWED_POINTS:
+        return val
+    return min(ALLOWED_POINTS, key=lambda p: abs(p - val))
+
 PROMPT_TEMPLATE = """You are a senior software architect. Break the following project
 into a structured project blueprint.
 
@@ -43,6 +65,7 @@ comments, or any text outside the JSON. The JSON must match this exact schema:
       "dependencies": ["{project_id}-T0", "..."],
       "status": "upcoming",
       "priority": "high" | "medium" | "low",
+      "points": 3,
       "deadline": "2026-06-15T00:00:00+00:00",
       "project_id": "{project_id}",
       "created_at": "2026-06-02T14:35:00+00:00",
@@ -60,6 +83,7 @@ Rules:
 - "dependencies" is an array of task ids this task depends on (use [] if none). Where tasks can be done independently and in parallel, model them with no dependency on each other — do not chain tasks sequentially unless one truly cannot start before another finishes.
 - "status" must always be "upcoming".
 - "priority" must be exactly one of: "high", "medium", "low", based on task importance.
+- "points" is an agile story-point estimate of relative effort/complexity — NOT calendar time. Use the Fibonacci scale and pick exactly one of: 1 (trivial), 2, 3, 5, 8, 13 (very large or highly uncertain). Judge it on scope, unknowns, and how many moving parts the task touches. Most tasks should land at 2, 3, or 5; reserve 8 and 13 for genuinely large or ambiguous work, and 1 for near-trivial changes.
 - "deadline" must be an ISO 8601 datetime string. Estimate a realistic deadline for each task starting from today, taking into account task complexity, priority, and dependencies — higher priority and tasks with no dependencies should have earlier deadlines. Spread deadlines across the project timeline so the full project completes within a reasonable timeframe.
 - "project_id" must always be "{project_id}".
 - "project_name" should match the given project name.
@@ -173,6 +197,7 @@ def generate_blueprint(
         task["updated_at"] = now_iso
         task["platform"] = "github"
         task["project_id"] = project_id
+        task["points"] = normalize_points(task.get("points"))
 
     blueprint["project_name"] = name
     blueprint["project_id"] = project_id

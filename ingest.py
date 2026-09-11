@@ -16,6 +16,10 @@ from neo4j import GraphDatabase
 from query import project_id_from_task_id
 
 DEFAULT_STATUS = "upcoming"
+# Story-point fallback when a task arrives without one (e.g. a legacy task, or a
+# manual push). blueprint.normalize_points already snaps generated tasks to the
+# Fibonacci scale; this only guards tasks that never went through it.
+DEFAULT_POINTS = 3
 
 # The canonical status vocabulary the whole AI service uses (Clover, the PATCH
 # endpoint, standup, query all agree on these four). Anything else — legacy
@@ -96,6 +100,7 @@ def ingest_tasks(session, tasks: list[dict]) -> None:
             t.assigned_to = task.assigned_to,
             t.project_id = task.project_id,
             t.status = coalesce(task.status, $default_status),
+            t.points = coalesce(task.points, $default_points),
             t.created_at = task.created_at,
             t.updated_at = task.updated_at,
             t.gap_detected = task.gap_detected,
@@ -103,6 +108,7 @@ def ingest_tasks(session, tasks: list[dict]) -> None:
         """,
         tasks=tasks,
         default_status=DEFAULT_STATUS,
+        default_points=DEFAULT_POINTS,
     )
 
 
