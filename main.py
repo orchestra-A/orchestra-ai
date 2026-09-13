@@ -240,12 +240,16 @@ class AddTaskRequest(BaseModel):
 
 
 class AddMemberRequest(BaseModel):
-    # Smart add: register the member's skills, then let them absorb open work.
-    # project_id scopes the gap top-up to one project; omit to consider open
-    # tasks across the whole graph.
-    name: str
+    # Smart add: register the member's skills, then rebalance work onto them.
+    # username is the developer's stable identifier (distinct from a display
+    # name in the backend DB) — it becomes the developer's identity in the graph
+    # and the value used for assignment, so it must match how the same person is
+    # identified elsewhere (e.g. assigned_to). project_id is required — a member
+    # joins a specific project, so the rebalance (which tasks are reassignable,
+    # and the fair-share load math) must be scoped to that project.
+    username: str
     skills: list[str] = []
-    project_id: str | None = None
+    project_id: str
 
 
 def get_api_key() -> str:
@@ -1294,17 +1298,21 @@ def add_member(body: AddMemberRequest) -> dict[str, Any]:
     a deterministic point-balance (see add_member.select_rebalance) that pulls
     from the most-loaded teammates and stops at the fair share.
     """
-    name = body.name.strip()
+    username = body.username.strip()
+    project_id = body.project_id.strip()
     member_skills = [s.strip() for s in body.skills if s and s.strip()]
-    if not name:
-        raise HTTPException(status_code=400, detail="name cannot be empty.")
+    if not username:
+        raise HTTPException(status_code=400, detail="username cannot be empty.")
+    if not project_id:
+        raise HTTPException(status_code=400, detail="project_id cannot be empty.")
 
     # 1. Register the member (create Developer + HAS_SKILL). Additive / idempotent.
+    #    username is the developer's identity in the graph (stored as Developer.name).
     try:
         if member_skills:
-            developer = merge_developer_skills(name, member_skills)
+            developer = merge_developer_skills(username, member_skills)
         else:
-            developer = ensure_developer(name)
+            developer = ensure_developer(username)
     except RuntimeError as exc:  # missing NEO4J_* env vars
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     except Exception as exc:  # Neo4j unavailable / query failure
@@ -1323,7 +1331,7 @@ def add_member(body: AddMemberRequest) -> dict[str, Any]:
 
     # 2. Gather the safe-to-move pool (unassigned or upcoming). None -> done.
     try:
-        candidates = reassignable_tasks(body.project_id)
+        candidates = reassignable_tasks(project_id)
     except Exception:
         candidates = []
     if not candidates:
@@ -1340,15 +1348,15 @@ def add_member(body: AddMemberRequest) -> dict[str, Any]:
     moved_summary: list[dict[str, Any]] = []
     try:
         # Current load per existing developer, and the team size incl. the newcomer.
-        cap = capacity_by_developer(project_id=body.project_id)
+        cap = capacity_by_developer(project_id=project_id)
         loads = {d["developer"]: d.get("remaining_points", 0) for d in cap.get("developers", [])}
-        num_devs_incl_new = len(loads) + (0 if name in loads else 1)
+        num_devs_incl_new = len(loads) + (0 if username in loads else 1)
 
         # Which candidates suit the new member (Gemini). Fall back to all
         # candidates in their existing order so they still get work if the model
         # call fails — better to over-offer than to leave them idle.
         try:
-            fit_ids = rank_fit(name, member_skills, candidates, api_key)
+            fit_ids = rank_fit(username, member_skills, candidates, api_key)
         except Exception:
             fit_ids = []
         if not fit_ids:
@@ -1362,7 +1370,7 @@ def add_member(body: AddMemberRequest) -> dict[str, Any]:
         updates = [
             {
                 "id": tid,
-                "assigned_to": name,
+                "assigned_to": username,
                 "gap_detected": False,
                 "missing_skill_or_role": None,
                 "points": cand_by_id[tid].get("points"),
@@ -1388,7 +1396,7 @@ def add_member(body: AddMemberRequest) -> dict[str, Any]:
             # — no-op until the backend exposes a task field PATCH (see edit_task).
             for tid in move_ids:
                 try:
-                    push_task_edit_to_backend(tid, {"assigned_to": name})
+                    push_task_edit_to_backend(tid, {"assigned_to": username})
                 except Exception:
                     pass
             invalidate_index()
