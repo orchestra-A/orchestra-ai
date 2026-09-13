@@ -356,36 +356,67 @@ def push_project_to_backend(
         return False
 
 
-def push_member_to_backend(project_id: str, username: str) -> bool:
-    """Best-effort: add a member to the backend project's members list.
+def push_member_to_backend(project_id: str, username: str) -> dict[str, Any]:
+    """Add a member to the backend project's members list; report the outcome.
 
     POST /members writes the developer to Neo4j; the backend keeps its own
     per-project `members` column — a JSON array of username strings, e.g.
     ["mitaali_singh", "PrinceNegi"]. PATCH /projects/{id} replaces the fields it
     is given, so we GET the project, append this username if it's missing, and
-    PATCH the FULL list back — never clobbering the existing members. No-op (and
-    never a partial write) on any failure; the graph is updated regardless.
+    PATCH the FULL list back — never clobbering the existing members (and never a
+    partial write on failure). The graph is updated regardless of this result.
+
+    Returns {"synced": bool, "detail": str|None}. `synced` is surfaced in the
+    /members response so a silent backend failure (e.g. an archived project,
+    which the backend refuses to edit with a 400) is visible instead of hidden.
     """
     backend_url = os.getenv(
         "BACKEND_URL", "https://orchestra-backend-30fy.onrender.com"
     )
     try:
         resp = requests.get(f"{backend_url}/projects/{project_id}", timeout=30)
+        if resp.status_code == 404:
+            return {"synced": False, "detail": "project not found in backend"}
         resp.raise_for_status()
         project = resp.json() or {}
         members = project.get("members")
         if not isinstance(members, list):
             members = []
         if username in members:
-            return True  # already listed — nothing to do
+            return {"synced": True, "detail": "already listed"}
         patch = requests.patch(
             f"{backend_url}/projects/{project_id}",
             json={"members": members + [username]},
             timeout=30,
         )
-        return patch.ok
-    except Exception:
-        return False
+        if not patch.ok:
+            try:
+                msg = patch.json().get("error") or patch.text
+            except Exception:
+                msg = patch.text
+            return {
+                "synced": False,
+                "detail": f"backend rejected update ({patch.status_code}): {msg}",
+            }
+        # A 2xx does NOT mean it persisted: the backend's Update Project handler
+        # silently drops fields not in its model (confirmed 2026-09-14 — PATCH
+        # returns 200 but `members` is unchanged). So re-read and CONFIRM the
+        # member actually landed before claiming success.
+        try:
+            verify = requests.get(f"{backend_url}/projects/{project_id}", timeout=30)
+            current = verify.json().get("members") if verify.ok else None
+        except Exception:
+            current = None
+        if isinstance(current, list) and username in current:
+            return {"synced": True, "detail": None}
+        return {
+            "synced": False,
+            "detail": "backend accepted the request (2xx) but did not persist "
+            "members — PATCH /projects/{id} ignores the members field; needs a "
+            "backend fix to include members in the Update Project handler",
+        }
+    except Exception as exc:
+        return {"synced": False, "detail": f"backend unreachable: {type(exc).__name__}"}
 
 
 def validate_description(name: str, description: str, api_key: str) -> str | None:
@@ -1360,12 +1391,13 @@ def add_member(body: AddMemberRequest) -> dict[str, Any]:
     # current post-merge set.
     effective_skills = developer.get("skills", [])
 
-    # Mirror the member to the backend project's members list (best-effort — the
-    # graph is updated regardless of whether the backend endpoint exists yet).
+    # Mirror the member to the backend project's members list. The graph is
+    # updated regardless; the result is reported (not swallowed) so a backend
+    # refusal — e.g. an archived project the backend won't edit — is visible.
     try:
-        push_member_to_backend(project_id, username)
-    except Exception:
-        pass
+        backend_sync = push_member_to_backend(project_id, username)
+    except Exception as exc:
+        backend_sync = {"synced": False, "detail": f"push error: {type(exc).__name__}"}
 
     # Only stop if we know NOTHING about their skills (none sent, none on record).
     if not effective_skills:
@@ -1375,6 +1407,8 @@ def add_member(body: AddMemberRequest) -> dict[str, Any]:
             "moved": [],
             "note": "Member added, but no skills are known for them — send skills "
             "or onboard them (GitHub) to auto-assign work.",
+            "backend_synced": backend_sync.get("synced"),
+            "backend_note": backend_sync.get("detail"),
         }
 
     # 2. Gather the safe-to-move pool (unassigned or upcoming). None -> done.
@@ -1388,6 +1422,8 @@ def add_member(body: AddMemberRequest) -> dict[str, Any]:
             "considered": 0,
             "moved": [],
             "note": "No unassigned or not-yet-started tasks available to rebalance.",
+            "backend_synced": backend_sync.get("synced"),
+            "backend_note": backend_sync.get("detail"),
         }
 
     # 3. Rebalance. Best-effort: any failure leaves the member registered and the
@@ -1479,6 +1515,8 @@ def add_member(body: AddMemberRequest) -> dict[str, Any]:
         "moved": moved_summary,
         "assigned_to_new_member": len(moved_summary),
         "points_taken": sum(m.get("points") or 0 for m in moved_summary),
+        "backend_synced": backend_sync.get("synced"),
+        "backend_note": backend_sync.get("detail"),
     }
 
 
