@@ -356,6 +356,29 @@ def push_project_to_backend(
         return False
 
 
+def push_member_to_backend(project_id: str, username: str, skills: list[str]) -> bool:
+    """Best-effort: add a member to the project's members list in the backend.
+
+    POST /members writes the developer to Neo4j; the backend keeps its own
+    per-project members list, so it must be told too. The endpoint/shape here is
+    ASSUMED (POST /projects/{id}/members) and is a harmless no-op until the
+    backend exposes it — same forward-compatible pattern as
+    push_task_edit_to_backend. Confirm the real contract with Arnav.
+    """
+    backend_url = os.getenv(
+        "BACKEND_URL", "https://orchestra-backend-30fy.onrender.com"
+    )
+    try:
+        response = requests.post(
+            f"{backend_url}/projects/{project_id}/members",
+            json={"username": username, "skills": skills},
+            timeout=30,
+        )
+        return response.ok
+    except Exception:
+        return False
+
+
 def validate_description(name: str, description: str, api_key: str) -> str | None:
     """Return an error reason if the description is not a meaningful software project."""
     prompt = f"""You are validating whether a project description represents a real, meaningful software project.
@@ -1320,6 +1343,13 @@ def add_member(body: AddMemberRequest) -> dict[str, Any]:
             status_code=503, detail=f"Graph database error: {exc}"
         ) from exc
 
+    # Mirror the member to the backend project's members list (best-effort — the
+    # graph is updated regardless of whether the backend endpoint exists yet).
+    try:
+        push_member_to_backend(project_id, username, member_skills)
+    except Exception:
+        pass
+
     # Without skills we can't skill-match work to them — register and stop.
     if not member_skills:
         return {
@@ -1361,6 +1391,15 @@ def add_member(body: AddMemberRequest) -> dict[str, Any]:
             fit_ids = []
         if not fit_ids:
             fit_ids = [c["id"] for c in candidates]
+        else:
+            # Unassigned tasks are unowned work — skill-fit must NEVER leave them
+            # null. Make every unassigned candidate eligible (appended after the
+            # skill-matched ones, so good fits are still prioritised). Without this,
+            # rank_fit could drop the null tasks a newcomer was added to pick up —
+            # exactly the "many tasks null yet none assigned to me" report.
+            for c in candidates:
+                if not c.get("assigned_to") and c["id"] not in fit_ids:
+                    fit_ids.append(c["id"])
 
         move_ids = select_rebalance(candidates, fit_ids, loads, num_devs_incl_new)
         cand_by_id = {c["id"]: c for c in candidates}
@@ -1381,10 +1420,12 @@ def add_member(body: AddMemberRequest) -> dict[str, Any]:
 
         if updates:
             uri = os.getenv("NEO4J_URI")
-            username = os.getenv("NEO4J_USERNAME")
+            # NB: local var must NOT be `username` — that's the member's username,
+            # and clobbering it here would corrupt the backend assignee mirror below.
+            neo4j_user = os.getenv("NEO4J_USERNAME")
             password = os.getenv("NEO4J_PASSWORD")
             database = os.getenv("NEO4J_DATABASE") or None
-            driver = GraphDatabase.driver(uri, auth=(username, password))
+            driver = GraphDatabase.driver(uri, auth=(neo4j_user, password))
             try:
                 driver.verify_connectivity()
                 with driver.session(database=database) as session:
