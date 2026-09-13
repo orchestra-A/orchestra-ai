@@ -356,25 +356,34 @@ def push_project_to_backend(
         return False
 
 
-def push_member_to_backend(project_id: str, username: str, skills: list[str]) -> bool:
-    """Best-effort: add a member to the project's members list in the backend.
+def push_member_to_backend(project_id: str, username: str) -> bool:
+    """Best-effort: add a member to the backend project's members list.
 
     POST /members writes the developer to Neo4j; the backend keeps its own
-    per-project members list, so it must be told too. The endpoint/shape here is
-    ASSUMED (POST /projects/{id}/members) and is a harmless no-op until the
-    backend exposes it — same forward-compatible pattern as
-    push_task_edit_to_backend. Confirm the real contract with Arnav.
+    per-project `members` column — a JSON array of username strings, e.g.
+    ["mitaali_singh", "PrinceNegi"]. PATCH /projects/{id} replaces the fields it
+    is given, so we GET the project, append this username if it's missing, and
+    PATCH the FULL list back — never clobbering the existing members. No-op (and
+    never a partial write) on any failure; the graph is updated regardless.
     """
     backend_url = os.getenv(
         "BACKEND_URL", "https://orchestra-backend-30fy.onrender.com"
     )
     try:
-        response = requests.post(
-            f"{backend_url}/projects/{project_id}/members",
-            json={"username": username, "skills": skills},
+        resp = requests.get(f"{backend_url}/projects/{project_id}", timeout=30)
+        resp.raise_for_status()
+        project = resp.json() or {}
+        members = project.get("members")
+        if not isinstance(members, list):
+            members = []
+        if username in members:
+            return True  # already listed — nothing to do
+        patch = requests.patch(
+            f"{backend_url}/projects/{project_id}",
+            json={"members": members + [username]},
             timeout=30,
         )
-        return response.ok
+        return patch.ok
     except Exception:
         return False
 
@@ -1354,7 +1363,7 @@ def add_member(body: AddMemberRequest) -> dict[str, Any]:
     # Mirror the member to the backend project's members list (best-effort — the
     # graph is updated regardless of whether the backend endpoint exists yet).
     try:
-        push_member_to_backend(project_id, username, effective_skills)
+        push_member_to_backend(project_id, username)
     except Exception:
         pass
 
