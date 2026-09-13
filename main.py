@@ -229,11 +229,14 @@ class AddTaskRequest(BaseModel):
     # Smart add: the AI picks the assignee, points, track, and dependencies, so
     # the caller only needs the project and what the task is. track is optional —
     # supply it to pin the section, or leave it blank and Gemini infers one
-    # consistent with the project's existing tracks.
+    # consistent with the project's existing tracks. assigned_to is optional too:
+    # name someone to assign the task manually (that name wins over the AI's
+    # pick), or leave it blank to let the AI choose the best-fit person.
     project_id: str
     title: str
     description: str = ""
     track: str | None = None
+    assigned_to: str | None = None
 
 
 class AddMemberRequest(BaseModel):
@@ -1193,6 +1196,11 @@ def add_task(body: AddTaskRequest) -> dict[str, Any]:
     assignee = placement.get("assigned_to")
     if assignee not in skills:
         assignee = None
+    # A manually supplied assignee wins over the AI's pick — honour the name as
+    # given (same as edit_task: ingest MERGEs the Developer node, so assigning to
+    # someone not yet on the project just creates/links them).
+    if body.assigned_to and body.assigned_to.strip():
+        assignee = body.assigned_to.strip()
     dependencies = [d for d in placement.get("dependencies", []) if d in existing_ids]
     points = placement.get("points") or DEFAULT_POINTS
     track = (placement.get("track") or body.track or "general").strip() or "general"
