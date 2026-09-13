@@ -1343,20 +1343,29 @@ def add_member(body: AddMemberRequest) -> dict[str, Any]:
             status_code=503, detail=f"Graph database error: {exc}"
         ) from exc
 
+    # Use the developer's FULL skill set from the graph, not just what this request
+    # sent. If the member was already onboarded (GitHub -> inferred HAS_SKILL edges),
+    # their skills auto-fill here, so adding them by username alone is enough to
+    # rebalance — the request only needs `skills` for a brand-new person the graph
+    # doesn't know yet. merge_developer_skills / ensure_developer both return the
+    # current post-merge set.
+    effective_skills = developer.get("skills", [])
+
     # Mirror the member to the backend project's members list (best-effort — the
     # graph is updated regardless of whether the backend endpoint exists yet).
     try:
-        push_member_to_backend(project_id, username, member_skills)
+        push_member_to_backend(project_id, username, effective_skills)
     except Exception:
         pass
 
-    # Without skills we can't skill-match work to them — register and stop.
-    if not member_skills:
+    # Only stop if we know NOTHING about their skills (none sent, none on record).
+    if not effective_skills:
         return {
             "developer": developer,
             "considered": 0,
             "moved": [],
-            "note": "Member added. Add their skills to auto-assign work.",
+            "note": "Member added, but no skills are known for them — send skills "
+            "or onboard them (GitHub) to auto-assign work.",
         }
 
     # 2. Gather the safe-to-move pool (unassigned or upcoming). None -> done.
@@ -1386,7 +1395,7 @@ def add_member(body: AddMemberRequest) -> dict[str, Any]:
         # candidates in their existing order so they still get work if the model
         # call fails — better to over-offer than to leave them idle.
         try:
-            fit_ids = rank_fit(username, member_skills, candidates, api_key)
+            fit_ids = rank_fit(username, effective_skills, candidates, api_key)
         except Exception:
             fit_ids = []
         if not fit_ids:
