@@ -299,7 +299,13 @@ def run_search(question: str, api_key: str, n_results: int = 3) -> list[dict[str
 
 
 def push_tasks_to_backend(tasks: list[dict]) -> int:
-    """POST each task to the Orchestra backend. Returns count of successes."""
+    """POST each task to the Orchestra backend. Returns count of successes.
+
+    Every failure is printed (task id + status/response body or exception) so a
+    batch that silently loses tasks shows up in the Render logs instead of
+    vanishing with zero trace — this is the exact gap that let generated tasks
+    disappear with no error anywhere.
+    """
     backend_url = os.getenv(
         "BACKEND_URL", "https://orchestra-backend-30fy.onrender.com"
     )
@@ -309,12 +315,28 @@ def push_tasks_to_backend(tasks: list[dict]) -> int:
             response = requests.post(
                 f"{backend_url}/tasks",
                 json=task,
+                headers={"x-api-key": os.getenv("INTERNAL_API_KEY", "")},
                 timeout=30,
             )
             response.raise_for_status()
             succeeded += 1
-        except Exception:
-            continue
+        except requests.exceptions.HTTPError as exc:
+            print(
+                f"[push_tasks_to_backend] FAILED task {task.get('id')}: "
+                f"{exc.response.status_code} {exc.response.text[:300]}",
+                flush=True,
+            )
+        except Exception as exc:
+            print(
+                f"[push_tasks_to_backend] FAILED task {task.get('id')}: {exc}",
+                flush=True,
+            )
+    if succeeded < len(tasks):
+        print(
+            f"[push_tasks_to_backend] {succeeded}/{len(tasks)} tasks saved to backend "
+            f"— see FAILED lines above for the rest.",
+            flush=True,
+        )
     return succeeded
 
 
@@ -482,9 +504,21 @@ def create_blueprint(body: BlueprintRequest) -> dict[str, Any]:
         except Exception:
             pass
 
-        ingest_all(assigned.get("tasks", []), skills)
+        try:
+            ingest_all(assigned.get("tasks", []), skills)
+        except Exception as exc:
+            # Nothing was actually saved anywhere (Neo4j is the source of
+            # truth) — this must surface as a real failure, not a silent
+            # "success" with a blueprint that was never persisted.
+            print(f"[/blueprint:{project_id}] ingest_all FAILED: {exc}", flush=True)
+            raise HTTPException(
+                status_code=503,
+                detail=f"Failed to save the generated project: {exc}",
+            ) from exc
         # Push the project FIRST so its row (with our pinned id) exists before the
         # tasks reference it — avoids the backend auto-creating a bare stub project.
+        # Best-effort by design (Neo4j already has the real data); failures are
+        # logged so a broken backend sync is visible instead of invisible.
         try:
             push_project_to_backend(
                 name=name,
@@ -495,14 +529,13 @@ def create_blueprint(body: BlueprintRequest) -> dict[str, Any]:
                 summary=summary,
                 created_by=body.created_by,
             )
-        except Exception:
-            pass
-        try:
-            push_tasks_to_backend(assigned.get("tasks", []))
-        except Exception:
-            pass
+        except Exception as exc:
+            print(f"[/blueprint:{project_id}] push_project_to_backend FAILED: {exc}", flush=True)
+        push_tasks_to_backend(assigned.get("tasks", []))
         invalidate_index()
         return assigned
+    except HTTPException:
+        raise
     except Exception:
         return blueprint
 
@@ -637,11 +670,21 @@ def create_blueprint_stream(body: BlueprintRequest) -> StreamingResponse:
                 pass
 
             yield sse({"status": "Saving to the knowledge graph..."})
-            ingest_all(assigned.get("tasks", []), skills)
+            try:
+                ingest_all(assigned.get("tasks", []), skills)
+            except Exception as exc:
+                # Nothing was actually saved anywhere (Neo4j is the source of
+                # truth) — this must be a real error event, not a fake `done`.
+                print(f"[/blueprint/stream:{project_id}] ingest_all FAILED: {exc}", flush=True)
+                yield sse({"error": f"Failed to save the generated project: {exc}", "status": 503})
+                return
 
             yield sse({"status": "Syncing with the backend..."})
             # Push the project FIRST so its row (with our pinned id) exists
             # before the tasks reference it — same ordering as POST /blueprint.
+            # Best-effort by design (Neo4j already has the real data); failures
+            # are logged AND surfaced as a warning status so they're visible
+            # instead of invisible.
             try:
                 push_project_to_backend(
                     name=name,
@@ -652,12 +695,15 @@ def create_blueprint_stream(body: BlueprintRequest) -> StreamingResponse:
                     summary=summary,
                     created_by=body.created_by,
                 )
-            except Exception:
-                pass
-            try:
-                push_tasks_to_backend(assigned.get("tasks", []))
-            except Exception:
-                pass
+            except Exception as exc:
+                print(f"[/blueprint/stream:{project_id}] push_project_to_backend FAILED: {exc}", flush=True)
+                yield sse({"status": "Warning: project details failed to sync to the backend."})
+            tasks_to_push = assigned.get("tasks", [])
+            saved_count = push_tasks_to_backend(tasks_to_push)
+            if saved_count < len(tasks_to_push):
+                yield sse({
+                    "status": f"Warning: only {saved_count}/{len(tasks_to_push)} tasks saved to the backend."
+                })
             invalidate_index()
 
             yield sse({"done": True, "project": assigned})
