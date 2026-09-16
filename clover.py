@@ -776,6 +776,71 @@ def stream_answer(
             "plain conversational text.",
         )
 
+    if _is_active_project_question(question):
+        # "Working on" = has an actual task assigned right now, not just
+        # membership — count distinct project_ids from the user's own tasks.
+        # Scoped to their REAL current projects (backend membership) first —
+        # the graph alone accumulates years of old test/sample projects with
+        # stray tasks still assigned to real usernames, which inflates a
+        # naive whole-graph count wildly (verified: 28 vs. the real 7).
+        if identity and identity.get("cores"):
+            real_project_ids = set(fetch_user_project_ids(user_id)) if user_id else None
+            active_ids = sorted({
+                t.get("project_id") for t in all_tasks
+                if t.get("project_id")
+                and (real_project_ids is None or t.get("project_id") in real_project_ids)
+                and _assignee_matches_aliases(identity["cores"], t.get("assigned_to", ""))
+            })
+            active_names = [project_names.get(pid, pid) for pid in active_ids]
+            names_str = ", ".join(active_names) if active_names else "none"
+            prompt_parts.insert(
+                0,
+                "Active-work context (already computed — trust this exact "
+                "figure, do not guess or recount from the task list):\n"
+                f"The user currently has a task assigned to them in exactly "
+                f"{len(active_ids)} project(s): {names_str}.\n"
+                "Answer their question about how many/which projects they're "
+                "actively working on directly from this fact, in one short "
+                "conversational sentence.",
+            )
+        else:
+            prompt_parts.insert(
+                0,
+                "System note: there is no identified user for this request, so "
+                "which projects they're actively working on can't be looked up. "
+                "Tell them you can't tell without knowing who they are, rather "
+                "than guessing.",
+            )
+    elif _needs_project_count(question):
+        # "Part of" = membership, regardless of whether a task is assigned yet.
+        # Real creation dates are included so a "...since <date>" qualifier can
+        # be answered by Gemini filtering the real dates, not us pre-parsing
+        # whatever date phrasing the user happened to use.
+        if user_id:
+            owned = fetch_user_projects_full(user_id)
+            names_str = ", ".join(
+                f"{p['name']} (created {p['created_at']})" for p in owned
+            ) if owned else "none"
+            prompt_parts.insert(
+                0,
+                "Project-membership context (already looked up — trust this "
+                "exact figure and these dates, do not guess or recount from "
+                "the task list):\n"
+                f"The user is a member of exactly {len(owned)} project(s): {names_str}.\n"
+                "Answer their question about how many/which projects they're "
+                "part of directly from this fact, in one short conversational "
+                "sentence. If they asked about a specific date/time range, "
+                "filter using the real created-dates above and only count "
+                "the ones that qualify.",
+            )
+        else:
+            prompt_parts.insert(
+                0,
+                "System note: there is no identified user for this request, so "
+                "their project membership can't be looked up. Tell them you "
+                "can't tell without knowing who they are, rather than guessing.",
+            )
+
     if task_update_prompt:
         prompt_parts.insert(0, task_update_prompt)
     elif task_update:
@@ -1550,6 +1615,55 @@ _POINTS_KEYWORDS = {
 def _needs_points_summary(question: str) -> bool:
     q = question.lower()
     return any(kw in q for kw in _POINTS_KEYWORDS)
+
+
+# "How many projects am I working on" is a cross-project identity question —
+# it must answer from the user's real project membership (fetch_user_project_ids),
+# not from whichever single project_id happens to be in context, and not left
+# for Gemini to guess/count from a task dump it was never given in full.
+#
+# "Working on" and "part of" are different questions with different right
+# answers, not two phrasings of the same one: "working on" means an actual
+# assigned task right now; "part of" means project membership regardless of
+# whether a task is assigned yet. A "since <date>" qualifier is answered by
+# handing Gemini the real creation dates rather than us trying to parse the
+# date ourselves — it's already reliable at that and the dates are real.
+_PROJECT_MEMBERSHIP_KEYWORDS = {
+    "how many projects", "which projects", "what projects am i",
+    "projects am i part of", "projects am i on", "list my projects",
+    "my projects",
+}
+_ACTIVE_WORK_PHRASE = "working on"
+
+
+def _needs_project_count(question: str) -> bool:
+    q = question.lower()
+    return "project" in q and any(kw in q for kw in _PROJECT_MEMBERSHIP_KEYWORDS)
+
+
+def _is_active_project_question(question: str) -> bool:
+    q = question.lower()
+    return "project" in q and _ACTIVE_WORK_PHRASE in q
+
+
+def fetch_user_projects_full(user_id: str) -> list[dict]:
+    """Return {id, name, created_at} for every project the user is a member of.
+
+    Superset of fetch_user_project_ids — kept separate rather than changing
+    that function's return shape, since other call sites depend on it staying
+    a plain list of ids.
+    """
+    backend_url = os.getenv("BACKEND_URL", "https://orchestra-backend-30fy.onrender.com")
+    try:
+        resp = requests.get(f"{backend_url}/projects", params={"user_id": user_id}, timeout=10)
+        resp.raise_for_status()
+        projects = resp.json().get("projects", [])
+        return [
+            {"id": p["id"], "name": p.get("name", p["id"]), "created_at": p.get("created_at")}
+            for p in projects if p.get("id")
+        ]
+    except Exception:
+        return []
 
 
 def _points_summary(tasks: list[dict]) -> list[dict]:
