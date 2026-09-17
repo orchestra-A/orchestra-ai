@@ -187,6 +187,12 @@ class BlueprintRequest(BaseModel):
     # of minting a new one — without this, every modify created a duplicate
     # project. Omitted/blank for a brand-new project (a fresh id is generated).
     project_id: str | None = None
+    # The frontend's create-project form already sends these (field names must
+    # match exactly — confirmed against Blueprint.jsx's payload); undeclared
+    # fields are silently dropped by Pydantic, which is exactly how these went
+    # missing before (D-02).
+    tracked_repos: list[str] = []
+    tracked_channels: list[str] = []
 
 
 class AssignRequest(BaseModel):
@@ -348,6 +354,8 @@ def push_project_to_backend(
     project_id: str,
     summary: str = "",
     created_by: str = "",
+    tracked_repos: list[str] | None = None,
+    tracked_channels: list[str] | None = None,
 ) -> bool:
     """POST project details to the Orchestra backend. Returns True on success."""
     backend_url = os.getenv(
@@ -369,6 +377,10 @@ def push_project_to_backend(
                 # it from the body yet) — sent so it populates the moment the
                 # backend honours it; harmless until then.
                 "created_by": created_by,
+                # Field names confirmed against the backend's own POST /projects
+                # handler, which already accepts and persists both (D-02).
+                "tracked_repos": tracked_repos or [],
+                "tracked_channels": tracked_channels or [],
             },
             timeout=30,
         )
@@ -528,6 +540,8 @@ def create_blueprint(body: BlueprintRequest) -> dict[str, Any]:
                 project_id=project_id,
                 summary=summary,
                 created_by=body.created_by,
+                tracked_repos=body.tracked_repos,
+                tracked_channels=body.tracked_channels,
             )
         except Exception as exc:
             print(f"[/blueprint:{project_id}] push_project_to_backend FAILED: {exc}", flush=True)
@@ -694,6 +708,8 @@ def create_blueprint_stream(body: BlueprintRequest) -> StreamingResponse:
                     project_id=project_id,
                     summary=summary,
                     created_by=body.created_by,
+                    tracked_repos=body.tracked_repos,
+                    tracked_channels=body.tracked_channels,
                 )
             except Exception as exc:
                 print(f"[/blueprint/stream:{project_id}] push_project_to_backend FAILED: {exc}", flush=True)
@@ -1056,10 +1072,20 @@ def push_task_edit_to_backend(task_id: str, fields: dict[str, Any]) -> bool:
     )
     try:
         response = requests.patch(
-            f"{backend_url}/tasks/{task_id}/assign", json=fields, timeout=30
+            f"{backend_url}/tasks/{task_id}/assign",
+            json=fields,
+            headers={"x-api-key": os.getenv("INTERNAL_API_KEY", "")},
+            timeout=30,
         )
+        if not response.ok:
+            print(
+                f"[push_task_edit_to_backend] FAILED task {task_id}: "
+                f"{response.status_code} {response.text[:300]}",
+                flush=True,
+            )
         return response.ok
-    except Exception:
+    except Exception as exc:
+        print(f"[push_task_edit_to_backend] FAILED task {task_id}: {exc}", flush=True)
         return False
 
 

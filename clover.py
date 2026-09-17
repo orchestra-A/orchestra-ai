@@ -160,10 +160,18 @@ def push_task_status_to_backend(task_id: str, new_status: str) -> bool:
         resp = requests.patch(
             f"{backend_url}/tasks/{task_id}/status",
             json={"status": new_status},
+            headers={"x-api-key": os.getenv("INTERNAL_API_KEY", "")},
             timeout=15,
         )
+        if not resp.ok:
+            print(
+                f"[push_task_status_to_backend] FAILED task {task_id}: "
+                f"{resp.status_code} {resp.text[:300]}",
+                flush=True,
+            )
         return resp.ok
-    except Exception:
+    except Exception as exc:
+        print(f"[push_task_status_to_backend] FAILED task {task_id}: {exc}", flush=True)
         return False
 
 

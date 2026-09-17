@@ -217,4 +217,16 @@ Failure to follow this rule will break downstream scripts and integrations that 
 
 ---
 
-*Last updated: June 2026 — Orchestra + Clover Team*
+## 6. Project Creation Request (`POST /blueprint`, `POST /blueprint/stream`)
+
+**Added fields (2026-09-16, D-02 fix):** `tracked_repos: string[]` and
+`tracked_channels: string[]`, both optional, default `[]`. These were already
+sent by the frontend's create-project form and already accepted/persisted by
+the backend's `POST /projects` and `PATCH /projects/{id}` — the AI server's
+`BlueprintRequest` was the only place silently dropping them (undeclared
+Pydantic fields are discarded, not rejected). Now declared on `BlueprintRequest`
+and forwarded via `push_project_to_backend()` unchanged.
+
+---
+
+*Last updated: September 2026 — Orchestra + Clover Team*
